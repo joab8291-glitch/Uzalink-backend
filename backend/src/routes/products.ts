@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { requirePremium } from "../middleware/premium.js";
-import { putPrivateObject } from "../servicesm/storage.js";
+import { putPrivateObject } from "../services/storage.js";
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024}}); export const productRouter=Router();
 productRouter.get("/",async(req,res,next)=>{try{const products=await prisma.product.findMany({where:{status:"ACTIVE"},include:{seller:{select:{handle:true,user:{select:{name:true}}}}},orderBy:{createdAt:"desc"}});res.json({products});}catch(e){next(e);}});
