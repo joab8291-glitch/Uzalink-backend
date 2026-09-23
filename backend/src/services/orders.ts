@@ -54,5 +54,8 @@ export async function issueDownload(grantToken: string, ipHash?: string, userAge
   if (grant.downloadCount >= grant.maxDownloads) throw new Error("Download limit reached");
   if (!grant.product.privateFileKey) throw new Error("No private file is attached to this product");
   await prisma.$transaction([prisma.downloadGrant.update({ where: { id: grant.id }, data: { downloadCount: { increment: 1 }, lastDownloadedAt: new Date() } }), prisma.downloadEvent.create({ data: { grantId: grant.id, ipHash, userAgent } })]);
-  return signedDownloadUrl(grant.product.privateFileKey, grant.product.fileName || "download", 300);
-}
+  return signedDownloadUrl(
+  grant.product.privateFileKey ?? undefined,
+  grant.product.fileName || "download",
+  300
+);
