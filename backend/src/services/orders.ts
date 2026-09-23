@@ -16,7 +16,9 @@ export async function fulfillPaidOrder(orderId: string, paymentId: string, recei
   const result = await prisma.$transaction(async tx => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: { include: { product: { include: { seller: { include: { user: true } } } } } } } });
     if (!order) throw new Error("Order not found");
-    if (order.status === "PAID" || order.status === "FULFILLED") return order;
+    if (order.status === "PAID" || order.status === "FULFILLED") {
+  return { order, downloadToken: undefined };
+}
     const item = order.items[0];
     const seller = item.product.seller;
     await tx.payment.update({ where: { id: paymentId }, data: { status: "SUCCESS", receipt } });
