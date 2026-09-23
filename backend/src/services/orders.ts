@@ -271,7 +271,7 @@ export async function fulfillPaidOrder(
 
   if (order.buyerEmail) {
     await sendEmail(
-      order.buyerId,
+      order.buyerId ?? undefined
       order.buyerEmail,
       "UzaLink payment confirmed",
       `Your payment for ${item.product.name} was confirmed. Order ${order.publicId}.${download}`
@@ -280,7 +280,7 @@ export async function fulfillPaidOrder(
 
   if (order.buyerPhone) {
     await sendSms(
-      order.buyerId,
+      order.buyerId ?? undefined
       order.buyerPhone,
       `UzaLink: payment confirmed for ${item.product.name}. Order ${order.publicId}.`
     );
