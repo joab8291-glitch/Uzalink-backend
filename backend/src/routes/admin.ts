@@ -1,0 +1,9 @@
+import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
+
+export const adminRouter=Router();adminRouter.use(requireAuth,requireRole("ADMIN"));
+adminRouter.get("/dashboard",async(_req,res,next)=>{try{const [users,sellers,products,orders,payouts,revenue]=await Promise.all([prisma.user.count(),prisma.sellerProfile.count(),prisma.product.count(),prisma.order.count(),prisma.payout.count(),prisma.order.aggregate({where:{status:{in:["PAID","FULFILLED"]}},_sum:{amountCents:true,commissionCents:true,sellerNetCents:true}})]);res.json({stats:{users,sellers,products,orders,payouts,grossCents:revenue._sum.amountCents||0,commissionCents:revenue._sum.commissionCents||0,sellerNetCents:revenue._sum.sellerNetCents||0}});}catch(e){next(e);}});
+adminRouter.get("/orders",async(_req,res,next)=>{try{res.json({orders:await prisma.order.findMany({include:{buyer:true,items:{include:{product:{include:{seller:true}}}},payments:true},orderBy:{createdAt:"desc"},take:100})});}catch(e){next(e);}});
+adminRouter.post("/products/:id/status",async(req,res,next)=>{try{const status=req.body?.status;if(!["DRAFT","ACTIVE","PAUSED","ARCHIVED"].includes(status))return res.status(400).json({error:"Invalid status"});const p=await prisma.product.update({where:{id:req.params.id},data:{status}});res.json({product:p});}catch(e){next(e);}});
+adminRouter.post("/payouts/:id/mark-paid",async(req,res,next)=>{try{const p=await prisma.payout.findUnique({where:{id:req.params.id}});if(!p)return res.status(404).json({error:"Payout not found"});const updated=await prisma.$transaction(async tx=>{const row=await tx.payout.update({where:{id:p.id},data:{status:"PAID",processedAt:new Date(),reference:req.body?.reference}});await tx.sellerProfile.update({where:{id:p.sellerId},data:{pendingCents:{decrement:p.amountCents}}});return row;});res.json({payout:updated});}catch(e){next(e);}});

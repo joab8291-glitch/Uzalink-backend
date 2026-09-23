@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole { BUYER SELLER ADMIN }
+enum SubscriptionStatus { ACTIVE EXPIRED PENDING CANCELLED }
+enum ProductKind { DIGITAL SERVICE BOOKING EVENT COURSE SUBSCRIPTION PHYSICAL OTHER }
+enum ProductStatus { DRAFT ACTIVE PAUSED ARCHIVED }
+enum OrderStatus { PENDING PAID FAILED CANCELLED FULFILLED REFUNDED }
+enum PaymentStatus { PENDING SUCCESS FAILED }
+enum PaymentProvider { MPESA }
+enum DeliveryStatus { PENDING PROCESSING SHIPPED DELIVERED CANCELLED }
+enum BookingStatus { PENDING CONFIRMED COMPLETED CANCELLED }
+enum PayoutStatus { PENDING PROCESSING PAID FAILED }
+enum NotificationChannel { EMAIL SMS }
+
+model User {
+  id              String @id @default(cuid())
+  email           String? @unique
+  phone           String? @unique
+  name            String
+  role            UserRole @default(BUYER)
+  passwordHash    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  seller          SellerProfile?
+  subscriptions   Subscription[]
+  magicLinks      MagicLink[]
+  orders          Order[] @relation("BuyerOrders")
+  downloadGrants  DownloadGrant[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+}
+
+model SellerProfile {
+  id                String @id @default(cuid())
+  userId            String @unique
+  handle            String @unique
+  paymentNumber     String
+  paymentVerifiedAt DateTime?
+  balanceCents      Int @default(0)
+  pendingCents      Int @default(0)
+  lifetimeSalesCents Int @default(0)
+  totalOrders       Int @default(0)
+  user              User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products          Product[]
+  payouts           Payout[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Subscription {
+  id        String @id @default(cuid())
+  userId    String
+  status    SubscriptionStatus @default(PENDING)
+  plan      String @default("premium")
+  priceCents Int
+  startsAt  DateTime?
+  endsAt    DateTime?
+  paymentId String? @unique
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId, status])
+}
+
+model Product {
+  id            String @id @default(cuid())
+  code          String @unique
+  sellerId      String
+  name          String
+  description   String
+  longDescription String?
+  category      String
+  kind          ProductKind
+  status        ProductStatus @default(DRAFT)
+  priceCents    Int
+  imageUrl      String?
+  privateFileKey String?
+  fileName      String?
+  fileSize      Int?
+  deliveryText  String?
+  downloadLimit Int @default(5)
+  expiresHours  Int @default(72)
+  instant       Boolean @default(false)
+  inventory     Int?
+  rating        Float @default(0)
+  salesCount    Int @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  seller        SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+  downloadGrants DownloadGrant[]
+  bookings      Booking[]
+  deliveries    Delivery[]
+  @@index([sellerId, status])
+  @@index([status, kind])
+}
+
+model Order {
+  id            String @id @default(cuid())
+  publicId      String @unique
+  buyerId       String?
+  productId     String?
+  status        OrderStatus @default(PENDING)
+  amountCents   Int
+  commissionCents Int @default(0)
+  sellerNetCents Int @default(0)
+  buyerName     String?
+  buyerPhone    String
+  buyerEmail    String?
+  metadata     Json?
+  paidAt       DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  buyer        User? @relation("BuyerOrders", fields: [buyerId], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+  payments     Payment[]
+  downloadGrants DownloadGrant[]
+  booking      Booking?
+  delivery     Delivery?
+  @@index([buyerId, createdAt])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id           String @id @default(cuid())
+  orderId      String
+  productId    String
+  quantity     Int @default(1)
+  unitPriceCents Int
+  commissionCents Int
+  sellerNetCents Int
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model Payment {
+  id             String @id @default(cuid())
+  orderId        String
+  provider       PaymentProvider @default(MPESA)
+  status         PaymentStatus @default(PENDING)
+  amountCents    Int
+  phone          String
+  merchantRequestId String?
+  checkoutRequestId String? @unique
+  receipt        String?
+  resultCode     Int?
+  resultDescription String?
+  rawCallback    Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  order          Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  subscription   Subscription?
+  @@index([orderId, status])
+}
+
+model MagicLink {
+  id         String @id @default(cuid())
+  userId     String
+  tokenHash  String @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+}
+
+model DownloadGrant {
+  id          String @id @default(cuid())
+  orderId     String
+  productId   String
+  userId      String?
+  tokenHash   String @unique
+  expiresAt   DateTime
+  maxDownloads Int @default(5)
+  downloadCount Int @default(0)
+  lastDownloadedAt DateTime?
+  order       Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  user        User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  events      DownloadEvent[]
+  createdAt   DateTime @default(now())
+  @@index([orderId, productId])
+}
+
+model DownloadEvent {
+  id        String @id @default(cuid())
+  grantId   String
+  ipHash    String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  grant     DownloadGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+}
+
+model Booking {
+  id          String @id @default(cuid())
+  orderId     String @unique
+  productId   String
+  startsAt    DateTime?
+  endsAt      DateTime?
+  status      BookingStatus @default(PENDING)
+  notes       String?
+  order       Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Delivery {
+  id            String @id @default(cuid())
+  orderId       String @unique
+  status        DeliveryStatus @default(PENDING)
+  recipientName String?
+  phone         String?
+  address       String?
+  trackingCode  String?
+  notes         String?
+  order         Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product       Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Payout {
+  id            String @id @default(cuid())
+  sellerId      String
+  amountCents   Int
+  status        PayoutStatus @default(PENDING)
+  phone         String
+  reference     String?
+  processedAt   DateTime?
+  seller        SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+}
+
+model Notification {
+  id        String @id @default(cuid())
+  userId    String?
+  channel   NotificationChannel
+  recipient String
+  subject   String?
+  body      String
+  sentAt    DateTime?
+  error     String?
+  user      User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  ip        String?
+  metadata  Json?
+  user      User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  @@index([entity, entityId])
+}
