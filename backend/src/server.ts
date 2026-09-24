@@ -40,7 +40,6 @@ console.log("[CORS] Allowed origins:", allowedOrigins);
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Allow requests without an Origin header
-    // such as server-to-server requests and health checks.
     if (!origin) {
       return callback(null, true);
     }
@@ -136,22 +135,28 @@ app.use("/api/payouts", payoutRouter);
 
 /* =========================================================
    ERROR HANDLER
+   TEMPORARY DIAGNOSTIC VERSION
 ========================================================= */
 
 app.use(
   (
     err: any,
-    _req: express.Request,
+    req: express.Request,
     res: express.Response,
     _next: express.NextFunction
   ) => {
-    console.error("[SERVER ERROR]", err);
+    console.error("========================================");
+    console.error("[SERVER ERROR]");
+    console.error("METHOD:", req.method);
+    console.error("URL:", req.originalUrl);
+    console.error("BODY:", req.body);
+    console.error("ERROR:", err);
+    console.error("MESSAGE:", err?.message);
+    console.error("STACK:", err?.stack);
+    console.error("========================================");
 
     res.status(err?.statusCode || 500).json({
-      error:
-        env.NODE_ENV === "production"
-          ? "Something went wrong"
-          : err?.message || "Server error",
+      error: err?.message || "Server error",
     });
   }
 );
