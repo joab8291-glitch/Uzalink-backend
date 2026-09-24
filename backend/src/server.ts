@@ -81,7 +81,6 @@ app.use(helmet());
 app.use(cors(corsOptions));
 
 // Explicitly handle browser preflight requests
-app.options("*", cors(corsOptions));
 
 app.use(cookieParser());
 
