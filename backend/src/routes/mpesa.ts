@@ -28,31 +28,67 @@ async function token() {
     !env.MPESA_CONSUMER_KEY ||
     !env.MPESA_CONSUMER_SECRET
   ) {
-    throw new Error("M-Pesa credentials are not configured");
+    throw new Error(
+      "M-Pesa consumer key or consumer secret is not configured"
+    );
   }
 
   const basic = Buffer.from(
     `${env.MPESA_CONSUMER_KEY}:${env.MPESA_CONSUMER_SECRET}`
   ).toString("base64");
 
-  const r = await fetch(
-    `${base}/oauth/v1/generate?grant_type=client_credentials`,
-    {
-      headers: {
-        Authorization: `Basic ${basic}`,
-      },
-    }
-  );
+  let response: Response;
 
-  if (!r.ok) {
-    throw new Error("Could not authenticate with M-Pesa");
+  try {
+    response = await fetch(
+      `${base}/oauth/v1/generate?grant_type=client_credentials`,
+      {
+        headers: {
+          Authorization: `Basic ${basic}`,
+        },
+      }
+    );
+  } catch (error) {
+    console.error("M-Pesa OAuth network error:", error);
+
+    throw new Error(
+      `Could not connect to M-Pesa OAuth endpoint (${base})`
+    );
   }
 
-  return (
-    await r.json() as {
-      access_token: string;
-    }
-  ).access_token;
+  const raw = await response.text();
+
+  let data: any = {};
+
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = { raw };
+  }
+
+  if (!response.ok) {
+    console.error("M-Pesa OAuth error:", {
+      status: response.status,
+      data,
+    });
+
+    throw new Error(
+      data?.error_description ||
+        data?.errorMessage ||
+        data?.error ||
+        `M-Pesa authentication failed (${response.status})`
+    );
+  }
+
+  if (!data.access_token) {
+    console.error("M-Pesa OAuth missing access token:", data);
+
+    throw new Error(
+      "M-Pesa authentication succeeded but no access token was returned"
+    );
+  }
+
+  return data.access_token as string;
 }
 
 export async function stkPush(input: {
@@ -66,10 +102,13 @@ export async function stkPush(input: {
     !env.MPESA_SHORTCODE ||
     !env.MPESA_CALLBACK_URL
   ) {
-    throw new Error("M-Pesa STK configuration is incomplete");
+    throw new Error(
+      "M-Pesa STK configuration is incomplete"
+    );
   }
 
   const phone = normalizePhone(input.phone);
+
   const access = await token();
 
   const timestamp = new Date()
@@ -81,40 +120,97 @@ export async function stkPush(input: {
     `${env.MPESA_SHORTCODE}${env.MPESA_PASSKEY}${timestamp}`
   ).toString("base64");
 
-  const r = await fetch(
-    `${base}/mpesa/stkpush/v1/processrequest`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${access}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        BusinessShortCode: env.MPESA_SHORTCODE,
-        Password: password,
-        Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
-        Amount: Math.max(
-          1,
-          Math.round(input.amountCents / 100)
-        ),
-        PartyA: phone,
-        PartyB: env.MPESA_SHORTCODE,
-        PhoneNumber: phone,
-        CallBackURL: env.MPESA_CALLBACK_URL,
-        AccountReference: input.accountReference.slice(0, 12),
-        TransactionDesc: input.description.slice(0, 20),
-      }),
-    }
-  );
+  const payload = {
+    BusinessShortCode: env.MPESA_SHORTCODE,
+    Password: password,
+    Timestamp: timestamp,
+    TransactionType: "CustomerPayBillOnline",
+    Amount: Math.max(
+      1,
+      Math.round(input.amountCents / 100)
+    ),
+    PartyA: phone,
+    PartyB: env.MPESA_SHORTCODE,
+    PhoneNumber: phone,
+    CallBackURL: env.MPESA_CALLBACK_URL,
+    AccountReference: input.accountReference.slice(0, 12),
+    TransactionDesc: input.description.slice(0, 20),
+  };
 
-  const data = await r.json() as any;
+  console.log("Starting M-Pesa STK Push:", {
+    environment: env.MPESA_ENV,
+    base,
+    phone,
+    amount: payload.Amount,
+    shortcode: env.MPESA_SHORTCODE,
+    callbackUrl: env.MPESA_CALLBACK_URL,
+    accountReference: payload.AccountReference,
+  });
 
-  if (!r.ok || data.ResponseCode !== "0") {
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${base}/mpesa/stkpush/v1/processrequest`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${access}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+  } catch (error) {
+    console.error("M-Pesa STK network error:", error);
+
     throw new Error(
-      data.errorMessage ||
-        data.ResponseDescription ||
-        "M-Pesa STK Push failed"
+      `Could not connect to M-Pesa STK endpoint (${base})`
+    );
+  }
+
+  const raw = await response.text();
+
+  let data: any = {};
+
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = { raw };
+  }
+
+  console.log("M-Pesa STK response:", {
+    status: response.status,
+    data,
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      data?.errorMessage ||
+        data?.ResponseDescription ||
+        data?.error_description ||
+        data?.error ||
+        `M-Pesa STK request failed (${response.status})`
+    );
+  }
+
+  if (data.ResponseCode !== "0") {
+    throw new Error(
+      data?.errorMessage ||
+        data?.ResponseDescription ||
+        data?.CustomerMessage ||
+        "M-Pesa STK Push was rejected"
+    );
+  }
+
+  if (!data.CheckoutRequestID) {
+    console.error(
+      "M-Pesa returned success but no CheckoutRequestID:",
+      data
+    );
+
+    throw new Error(
+      "M-Pesa accepted the request but did not return a CheckoutRequestID"
     );
   }
 
