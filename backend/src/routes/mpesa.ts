@@ -1,6 +1,6 @@
 import { env } from "../lib/config.js";
 
-const base = env.MPESA_ENV === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
+const base = env.MPESA_ENV === "production" ? "https://api.safaricom.co.ke";
 const normalizePhone = (v: string) => { let p = v.replace(/[\s+\-]/g, ""); if (p.startsWith("0")) p = `254${p.slice(1)}`; if (/^[17]\d{8}$/.test(p)) p = `254${p}`; if (!/^254[17]\d{8}$/.test(p)) throw new Error("Invalid Kenyan M-Pesa phone number"); return p; };
 async function token() { if (!env.MPESA_CONSUMER_KEY || !env.MPESA_CONSUMER_SECRET) throw new Error("M-Pesa credentials are not configured"); const basic = Buffer.from(`${env.MPESA_CONSUMER_KEY}:${env.MPESA_CONSUMER_SECRET}`).toString("base64"); const r = await fetch(`${base}/oauth/v1/generate?grant_type=client_credentials`, { headers: { Authorization: `Basic ${basic}` } }); if (!r.ok) throw new Error("Could not authenticate with M-Pesa"); return (await r.json() as { access_token: string }).access_token; }
 export async function stkPush(input: { phone: string; amountCents: number; accountReference: string; description: string }) {
