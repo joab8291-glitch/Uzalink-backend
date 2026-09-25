@@ -1,32 +1,21 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { env } from "../lib/config.js";
 import { prisma } from "../lib/prisma.js";
 
 /**
- * Gmail / SMTP mailer
+ * Resend Email API
  *
- * For Gmail:
- * SMTP_HOST=smtp.gmail.com
- * SMTP_PORT=587
- * SMTP_USER=your@gmail.com
- * SMTP_PASS=Google App Password
- * MAIL_FROM=your@gmail.com
+ * Required environment variables:
  *
- * Port 587 uses STARTTLS.
- * Port 465 uses secure TLS.
+ * RESEND_API_KEY=re_xxxxxxxxx
+ * MAIL_FROM=onboarding@resend.dev
+ *
+ * For production, MAIL_FROM should normally use
+ * an address on a domain verified in Resend.
  */
-const mailer = env.SMTP_HOST
-  ? nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_PORT === 465,
-      auth: env.SMTP_USER
-        ? {
-            user: env.SMTP_USER,
-            pass: env.SMTP_PASS,
-          }
-        : undefined,
-    })
+
+const resend = env.RESEND_API_KEY
+  ? new Resend(env.RESEND_API_KEY)
   : null;
 
 /**
@@ -50,48 +39,16 @@ export async function sendEmail(
   });
 
   /**
-   * SMTP configuration checks
+   * Check Resend configuration
    */
-  if (!mailer) {
+  if (!resend) {
     const errorMessage =
-      "SMTP mailer is not configured. Check SMTP_HOST.";
+      "Resend is not configured. RESEND_API_KEY is missing.";
 
-    console.error("[SMTP] EMAIL FAILED");
-    console.error(`[SMTP] ${errorMessage}`);
-
-    await prisma.notification.update({
-      where: { id: n.id },
-      data: {
-        error: errorMessage,
-      },
-    });
-
-    throw new Error(errorMessage);
-  }
-
-  if (!env.SMTP_USER) {
-    const errorMessage =
-      "SMTP_USER is missing.";
-
-    console.error("[SMTP] EMAIL FAILED");
-    console.error(`[SMTP] ${errorMessage}`);
-
-    await prisma.notification.update({
-      where: { id: n.id },
-      data: {
-        error: errorMessage,
-      },
-    });
-
-    throw new Error(errorMessage);
-  }
-
-  if (!env.SMTP_PASS) {
-    const errorMessage =
-      "SMTP_PASS is missing.";
-
-    console.error("[SMTP] EMAIL FAILED");
-    console.error(`[SMTP] ${errorMessage}`);
+    console.error("========================================");
+    console.error("[EMAIL] EMAIL FAILED");
+    console.error(`[EMAIL] ${errorMessage}`);
+    console.error("========================================");
 
     await prisma.notification.update({
       where: { id: n.id },
@@ -107,8 +64,10 @@ export async function sendEmail(
     const errorMessage =
       "MAIL_FROM is missing.";
 
-    console.error("[SMTP] EMAIL FAILED");
-    console.error(`[SMTP] ${errorMessage}`);
+    console.error("========================================");
+    console.error("[EMAIL] EMAIL FAILED");
+    console.error(`[EMAIL] ${errorMessage}`);
+    console.error("========================================");
 
     await prisma.notification.update({
       where: { id: n.id },
@@ -121,27 +80,61 @@ export async function sendEmail(
   }
 
   /**
-   * Send email through SMTP
+   * Send through Resend API
    */
   try {
     console.log("========================================");
-    console.log("[SMTP] Sending email...");
-    console.log("[SMTP] Host:", env.SMTP_HOST);
-    console.log("[SMTP] Port:", env.SMTP_PORT);
-    console.log("[SMTP] User:", env.SMTP_USER);
-    console.log("[SMTP] From:", env.MAIL_FROM);
-    console.log("[SMTP] To:", to);
-    console.log("[SMTP] Subject:", subject);
+    console.log("[EMAIL] Sending email through Resend...");
+    console.log("[EMAIL] From:", env.MAIL_FROM);
+    console.log("[EMAIL] To:", to);
+    console.log("[EMAIL] Subject:", subject);
 
-    const info = await mailer.sendMail({
-      from: env.MAIL_FROM,
-      to,
-      subject,
-      text: body,
-    });
+    const { data, error } =
+      await resend.emails.send({
+        from: env.MAIL_FROM,
+        to: [to],
+        subject,
+        text: body,
+      });
 
-    console.log("[SMTP] Email sent successfully");
-    console.log("[SMTP] Message ID:", info.messageId);
+    /**
+     * Resend returned an error
+     */
+    if (error) {
+      const errorMessage =
+        error.message ||
+        "Resend email sending failed.";
+
+      console.error(
+        "[EMAIL] Resend returned an error:"
+      );
+      console.error(
+        "[EMAIL]",
+        errorMessage
+      );
+
+      await prisma.notification.update({
+        where: { id: n.id },
+        data: {
+          error: errorMessage,
+        },
+      });
+
+      throw new Error(errorMessage);
+    }
+
+    /**
+     * Successful email request
+     */
+    console.log(
+      "[EMAIL] Email sent successfully."
+    );
+
+    console.log(
+      "[EMAIL] Resend Message ID:",
+      data?.id
+    );
+
     console.log("========================================");
 
     await prisma.notification.update({
@@ -157,11 +150,11 @@ export async function sendEmail(
     const errorMessage =
       e instanceof Error
         ? e.message
-        : "Email failed";
+        : "Email sending failed.";
 
     console.error("========================================");
-    console.error("[SMTP] EMAIL FAILED");
-    console.error("[SMTP]", errorMessage);
+    console.error("[EMAIL] EMAIL FAILED");
+    console.error("[EMAIL]", errorMessage);
     console.error("========================================");
 
     await prisma.notification.update({
@@ -171,9 +164,11 @@ export async function sendEmail(
       },
     });
 
-    // IMPORTANT:
-    // Re-throw the error so the magic-link route
-    // does not incorrectly return a successful email response.
+    /**
+     * IMPORTANT:
+     * Re-throw so /magic-link does not
+     * falsely report a successful email.
+     */
     throw e;
   }
 }
@@ -204,12 +199,16 @@ export async function sendSms(
   }
 
   try {
-    console.log("[SMS] Sending SMS to:", to);
+    console.log(
+      "[SMS] Sending SMS to:",
+      to
+    );
 
     const r = await fetch(
       env.SMS_WEBHOOK_URL,
       {
         method: "POST",
+
         headers: {
           "Content-Type":
             "application/json",
@@ -252,8 +251,14 @@ export async function sendSms(
         ? e.message
         : "SMS failed";
 
-    console.error("[SMS] SMS FAILED");
-    console.error("[SMS]", errorMessage);
+    console.error(
+      "[SMS] SMS FAILED"
+    );
+
+    console.error(
+      "[SMS]",
+      errorMessage
+    );
 
     await prisma.notification.update({
       where: { id: n.id },
@@ -261,9 +266,6 @@ export async function sendSms(
         error: errorMessage,
       },
     });
-
-    // Keep existing SMS behavior:
-    // record the failure but don't crash the request.
   }
 
   return n;
