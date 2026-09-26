@@ -76,7 +76,7 @@ const corsOptions: cors.CorsOptions = {
   optionsSuccessStatus: 204,
 };
 
-app.use(helmet());
+app.use(helmet({\n  // Book covers are intentionally embedded by the Vercel frontend.\n  crossOriginResourcePolicy: { policy: "cross-origin" },\n}));
 
 app.use(cors(corsOptions));
 
