@@ -164,6 +164,96 @@ orderRouter.get("/:id", async (req, res, next) => {
 });
 
 /**
+ * Get secure download access for a paid order.
+ *
+ * The buyer supplies the same phone number used at checkout.
+ * The endpoint consumes one download and returns a short-lived
+ * signed storage URL. The private storage key is never exposed.
+ */
+orderRouter.post(
+  "/:id/download-access",
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          phone: z.string().min(7),
+        })
+        .parse(req.body);
+
+      const order = await prisma.order.findUnique({
+        where: { id: req.params.id },
+        include: {
+          downloadGrants: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          error: "Order not found",
+        });
+      }
+
+      if (order.buyerPhone !== body.phone) {
+        return res.status(403).json({
+          error: "The phone number does not match this order",
+        });
+      }
+
+      if (order.status !== "PAID" && order.status !== "FULFILLED") {
+        return res.status(409).json({
+          error: "Payment has not been confirmed yet",
+        });
+      }
+
+      const grant = order.downloadGrants[0];
+
+      if (!grant) {
+        return res.status(404).json({
+          error: "No digital download is available for this order",
+        });
+      }
+
+      // Generate a fresh access token for the existing grant. The token
+      // itself is never stored in plaintext; only its hash is persisted.
+      const token = randomToken();
+
+      const replacement = await prisma.downloadGrant.create({
+        data: {
+          orderId: grant.orderId,
+          productId: grant.productId,
+          userId: grant.userId,
+          tokenHash: hashToken(token),
+          expiresAt: grant.expiresAt,
+          maxDownloads: 1,
+        },
+      });
+
+      const ip = crypto
+        .createHash("sha256")
+        .update(req.ip || "")
+        .digest("hex");
+
+      const url = await issueDownload(token, ip, req.get("user-agent"));
+
+      // Remove the temporary grant after its single signed URL has been issued.
+      await prisma.downloadGrant.delete({
+        where: { id: replacement.id },
+      });
+
+      res.json({
+        url,
+        expiresInSeconds: 300,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+/**
  * Secure digital-product download
  */
 orderRouter.post(
