@@ -7,17 +7,72 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole { BUYER SELLER ADMIN }
-enum SubscriptionStatus { ACTIVE EXPIRED PENDING CANCELLED }
-enum ProductKind { DIGITAL SERVICE BOOKING EVENT COURSE SUBSCRIPTION PHYSICAL OTHER }
-enum ProductStatus { DRAFT ACTIVE PAUSED ARCHIVED }
-enum OrderStatus { PENDING PAID FAILED CANCELLED FULFILLED REFUNDED }
-enum PaymentStatus { PENDING SUCCESS FAILED }
-enum PaymentProvider { MPESA }
-enum DeliveryStatus { PENDING PROCESSING SHIPPED DELIVERED CANCELLED }
-enum BookingStatus { PENDING CONFIRMED COMPLETED CANCELLED }
-enum PayoutStatus { PENDING PROCESSING PAID FAILED }
-enum NotificationChannel { EMAIL SMS }
+enum UserRole {
+  BUYER
+  SELLER
+  ADMIN
+}
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  PENDING
+  CANCELLED
+}
+enum ProductKind {
+  DIGITAL
+  SERVICE
+  BOOKING
+  EVENT
+  COURSE
+  SUBSCRIPTION
+  PHYSICAL
+  OTHER
+}
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  FULFILLED
+  REFUNDED
+}
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+enum PaymentProvider {
+  MPESA
+}
+enum DeliveryStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+enum NotificationChannel {
+  EMAIL
+  SMS
+}
 
 model User {
   id String @id @default(cuid())
