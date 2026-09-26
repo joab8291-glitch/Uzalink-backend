@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
+import { normalizePhone } from "../services/mpesa.js";
+import { sendSellerPayout } from "../services/payouts.js";
 
 export const adminRouter = Router();
 
@@ -93,6 +95,138 @@ adminRouter.post("/products/:id/status", async (req, res, next) => {
     }
     const product = await prisma.product.update({ where: { id: req.params.id }, data: { status } });
     res.json({ product });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+adminRouter.post("/payouts/:id/send-mpesa", async (req, res, next) => {
+  try {
+    const payout = await prisma.payout.findUnique({
+      where: { id: req.params.id },
+      include: { seller: { include: { user: true } } },
+    });
+
+    if (!payout) {
+      return res.status(404).json({ error: "Payout not found" });
+    }
+
+    if (payout.status === "PAID") {
+      return res.status(409).json({ error: "This payout has already been paid." });
+    }
+
+    if (payout.status === "PROCESSING") {
+      return res.status(409).json({
+        error: "This payout is already being processed by M-Pesa.",
+      });
+    }
+
+    if (!payout.phone) {
+      return res.status(400).json({
+        error: "This author does not have a payout phone number.",
+      });
+    }
+
+    const phone = normalizePhone(payout.phone);
+
+    await prisma.payout.update({
+      where: { id: payout.id },
+      data: { phone },
+    });
+
+    try {
+      const mpesa = await sendSellerPayout(payout.id);
+      return res.json({ payoutId: payout.id, mpesa });
+    } catch (error) {
+      await prisma.payout.update({
+        where: { id: payout.id },
+        data: { status: "FAILED" },
+      });
+
+      return next(error);
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+adminRouter.post("/payouts", async (req, res, next) => {
+  try {
+    const sellerId = String(req.body?.sellerId || "");
+    const amountCents = Number(req.body?.amountCents);
+
+    if (!sellerId || !Number.isInteger(amountCents) || amountCents <= 0) {
+      return res.status(400).json({
+        error: "sellerId and a positive whole-number amountCents are required.",
+      });
+    }
+
+    const seller = await prisma.sellerProfile.findUnique({
+      where: { id: sellerId },
+      include: { user: true },
+    });
+
+    if (!seller) {
+      return res.status(404).json({ error: "Author/seller not found." });
+    }
+
+    if (!seller.paymentNumber) {
+      return res.status(400).json({
+        error: "This author has not configured a payout phone number.",
+      });
+    }
+
+    if (amountCents > seller.balanceCents) {
+      return res.status(400).json({
+        error: "The payout exceeds the author's available balance.",
+      });
+    }
+
+    const phone = normalizePhone(seller.paymentNumber);
+
+    const payout = await prisma.$transaction(async (tx) => {
+      await tx.sellerProfile.update({
+        where: { id: seller.id },
+        data: {
+          balanceCents: { decrement: amountCents },
+          pendingCents: { increment: amountCents },
+        },
+      });
+
+      return tx.payout.create({
+        data: {
+          sellerId: seller.id,
+          amountCents,
+          phone,
+          status: "PENDING",
+        },
+        include: {
+          seller: { include: { user: true } },
+        },
+      });
+    });
+
+    try {
+      const mpesa = await sendSellerPayout(payout.id);
+      return res.status(201).json({ payout, mpesa });
+    } catch (error) {
+      await prisma.$transaction([
+        prisma.payout.update({
+          where: { id: payout.id },
+          data: { status: "FAILED" },
+        }),
+        prisma.sellerProfile.update({
+          where: { id: seller.id },
+          data: {
+            pendingCents: { decrement: amountCents },
+            balanceCents: { increment: amountCents },
+          },
+        }),
+      ]);
+
+      return next(error);
+    }
   } catch (e) {
     next(e);
   }
