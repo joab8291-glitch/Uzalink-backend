@@ -13,3 +13,15 @@ export async function signedDownloadUrl(key: string, fileName: string, seconds: 
   if (!client) throw new Error("Private storage is not configured");
   return getSignedUrl(client, new GetObjectCommand({ Bucket: env.S3_BUCKET!, Key: key, ResponseContentDisposition: `${inline ? "inline" : "attachment"}; filename="${fileName.replace(/"/g, "")}"` }), { expiresIn: Math.min(seconds, 900) });
 }
+
+
+export async function getPrivateObject(key: string) {
+  if (!client) throw new Error("Private storage is not configured");
+
+  return client.send(
+    new GetObjectCommand({
+      Bucket: env.S3_BUCKET!,
+      Key: key,
+    })
+  );
+}
