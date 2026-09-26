@@ -4,7 +4,7 @@ import { z } from "zod";
 import crypto from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
-import { putPrivateObject, signedDownloadUrl } from "../services/storage.js";
+import { getPrivateObject, putPrivateObject } from "../services/storage.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -24,14 +24,40 @@ productRouter.get("/:code/cover", async (req, res, next) => {
       return res.status(404).json({ error: "Book cover not found" });
     }
 
-    const url = await signedDownloadUrl(
-      product.coverKey,
-      product.coverFileName || "cover",
-      900,
-      true
+    const object = await getPrivateObject(product.coverKey);
+    const contentType =
+      object.ContentType ||
+      "image/jpeg";
+
+    if (object.ContentLength !== undefined) {
+      res.setHeader(
+        "Content-Length",
+        String(object.ContentLength)
+      );
+    }
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=300, s-maxage=900"
     );
 
-    return res.redirect(url);
+    if (!object.Body) {
+      return res.status(404).json({
+        error: "Book cover not found",
+      });
+    }
+
+    const body = object.Body as any;
+
+    if (typeof body.pipe === "function") {
+      body.pipe(res);
+    } else {
+      const bytes = await body.transformToByteArray();
+      res.end(Buffer.from(bytes));
+    }
+
+    return;
   } catch (e) {
     next(e);
   }
