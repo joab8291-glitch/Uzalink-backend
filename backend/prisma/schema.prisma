@@ -106,7 +106,7 @@ model SellerProfile {
   id                String @id @default(cuid())
   userId            String @unique
   handle            String @unique
-  paymentNumber     String
+  paymentNumber     String?
   paymentVerifiedAt DateTime?
   balanceCents      Int @default(0)
   pendingCents      Int @default(0)
