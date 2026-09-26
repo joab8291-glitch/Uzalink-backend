@@ -20,7 +20,17 @@ productRouter.get("/:code/cover", async (req, res, next) => {
       where: { code: req.params.code },
     });
 
-    if (!product || product.status !== "ACTIVE" || !product.coverKey) {
+    if (!product || product.status !== "ACTIVE") {
+      return res.status(404).json({ error: "Book cover not found" });
+    }
+
+    // Older published books may have an imageUrl instead of a private coverKey.
+    // Keep those covers working while newer uploads use private object storage.
+    if (!product.coverKey) {
+      if (product.imageUrl) {
+        return res.redirect(302, product.imageUrl);
+      }
+
       return res.status(404).json({ error: "Book cover not found" });
     }
 
