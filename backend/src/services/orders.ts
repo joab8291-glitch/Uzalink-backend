@@ -289,6 +289,47 @@ export async function fulfillPaidOrder(
   return order;
 }
 
+export async function issueDownloadByGrantId(
+  grantId: string,
+  ipHash?: string,
+  userAgent?: string
+) {
+  const grant = await prisma.downloadGrant.findUnique({
+    where: { id: grantId },
+    include: { product: true, order: true },
+  });
+
+  if (!grant) throw new Error("Download access is invalid");
+  if (grant.order.status !== "PAID" && grant.order.status !== "FULFILLED") {
+    throw new Error("Payment not confirmed");
+  }
+  if (grant.expiresAt.getTime() < Date.now()) {
+    throw new Error("Download link has expired");
+  }
+  if (grant.downloadCount >= grant.maxDownloads) {
+    throw new Error("Download limit reached");
+  }
+  if (!grant.product.privateFileKey) {
+    throw new Error("No private file is attached to this product");
+  }
+
+  await prisma.$transaction([
+    prisma.downloadGrant.update({
+      where: { id: grant.id },
+      data: { downloadCount: { increment: 1 }, lastDownloadedAt: new Date() },
+    }),
+    prisma.downloadEvent.create({
+      data: { grantId: grant.id, ipHash, userAgent },
+    }),
+  ]);
+
+  return signedDownloadUrl(
+    grant.product.privateFileKey,
+    grant.product.fileName || "download",
+    300
+  );
+}
+
 export async function issueDownload(
   grantToken: string,
   ipHash?: string,
