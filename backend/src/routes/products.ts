@@ -7,7 +7,7 @@ import {
   requireAuth,
   requireRole,
 } from "../middleware/auth.js";
-import { putPrivateObject } from "../services/storage.js";
+import { putPrivateObject, signedDownloadUrl } from "../services/storage.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -17,7 +17,7 @@ const upload = multer({
   },
 });
 
-export const productRouter = Router();
+export const productRouter = Router();\n\n/**\n * Public signed cover image. The book file remains private.\n */\nproductRouter.get("/:code/cover", async (req, res, next) => {\n  try {\n    const product = await prisma.product.findUnique({ where: { code: req.params.code } });\n    if (!product || product.status !== "ACTIVE" || !product.coverKey) {\n      return res.status(404).json({ error: "Book cover not found" });\n    }\n    const url = await signedDownloadUrl(product.coverKey, product.coverFileName || "cover", 900, true);\n    return res.redirect(url);\n  } catch (e) { next(e); }\n});\n
 
 /**
  * Public product marketplace
@@ -117,7 +117,7 @@ productRouter.post(
   "/",
   requireAuth,
   requireRole("SELLER", "ADMIN"),
-  upload.single("file"),
+  upload.fields([{ name: "file", maxCount: 1 }, { name: "cover", maxCount: 1 }]),
 
   async (req, res, next) => {
     try {
@@ -212,9 +212,9 @@ productRouter.post(
         | string
         | undefined;
 
-      if (req.file) {
+      if (bookFile) {
         privateFileKey =
-          `products/${seller.id}/${crypto.randomUUID()}-${req.file.originalname.replace(
+          `products/${seller.id}/${crypto.randomUUID()}-${bookFile.originalname.replace(
             /[^a-zA-Z0-9._-]/g,
             "_"
           )}`;
