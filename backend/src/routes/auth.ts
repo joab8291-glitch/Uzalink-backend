@@ -166,6 +166,26 @@ authRouter.post(
 
       /**
        * ---------------------------------------------------
+       * Promote the configured administrator account.
+       * This is an allowlisted account, not a public role
+       * selection, so normal users cannot self-promote.
+       * ---------------------------------------------------
+       */
+      if (
+        env.ADMIN_EMAIL &&
+        user.email &&
+        user.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()
+      ) {
+        if (user.role !== "ADMIN") {
+          user = await prisma.user.update({
+            where: { id: user.id },
+            data: { role: "ADMIN" },
+          });
+        }
+      }
+
+      /**
+       * ---------------------------------------------------
        * Promote buyer to seller when seller login
        * is requested.
        * ---------------------------------------------------
