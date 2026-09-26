@@ -1,4 +1,3 @@
-```ts
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import type { Response } from "express";
@@ -9,20 +8,42 @@ export type Session = {
   role: "BUYER" | "SELLER" | "ADMIN";
 };
 
-export const hashToken = (token: string) =>
+/**
+ * Hash a magic-link token before storing or looking it up.
+ */
+export const hashToken = (token: string): string =>
   crypto
     .createHash("sha256")
     .update(token)
     .digest("hex");
 
-export const randomToken = (bytes = 32) =>
-  crypto.randomBytes(bytes).toString("hex");
+/**
+ * Generate a cryptographically secure random token.
+ */
+export const randomToken = (
+  bytes = 32
+): string =>
+  crypto
+    .randomBytes(bytes)
+    .toString("hex");
 
-export const signSession = (session: Session) =>
-  jwt.sign(session, env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+/**
+ * Create the JWT used for the authenticated session.
+ */
+export const signSession = (
+  session: Session
+): string =>
+  jwt.sign(
+    session,
+    env.JWT_SECRET,
+    {
+      expiresIn: "7d",
+    }
+  );
 
+/**
+ * Store the authenticated session in an HTTP-only cookie.
+ */
 export function setSessionCookie(
   res: Response,
   session: Session
@@ -36,20 +57,20 @@ export function setSessionCookie(
     {
       httpOnly: true,
 
-      // Required because the frontend and backend
-      // are hosted on different sites.
       secure: isProduction,
 
-      // Required for cross-site frontend/API requests.
       sameSite: isProduction
         ? "none"
         : "lax",
 
       maxAge:
-        7 * 24 * 60 * 60 * 1000,
+        7 *
+        24 *
+        60 *
+        60 *
+        1000,
 
       path: "/",
     }
   );
 }
-```
