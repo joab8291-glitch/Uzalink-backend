@@ -9,7 +9,7 @@ export async function putPrivateObject(key: string, body: Buffer, contentType: s
   await client.send(new PutObjectCommand({ Bucket: env.S3_BUCKET!, Key: key, Body: body, ContentType: contentType, ServerSideEncryption: "AES256" }));
   return key;
 }
-export async function signedDownloadUrl(key: string, fileName: string, seconds: number) {
+export async function signedDownloadUrl(key: string, fileName: string, seconds: number, inline = false) {
   if (!client) throw new Error("Private storage is not configured");
-  return getSignedUrl(client, new GetObjectCommand({ Bucket: env.S3_BUCKET!, Key: key, ResponseContentDisposition: `attachment; filename="${fileName.replace(/"/g, "")}"` }), { expiresIn: Math.min(seconds, 900) });
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: env.S3_BUCKET!, Key: key, ResponseContentDisposition: `${inline ? "inline" : "attachment"}; filename="${fileName.replace(/"/g, "")}"` }), { expiresIn: Math.min(seconds, 900) });
 }
