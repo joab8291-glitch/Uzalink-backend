@@ -13,6 +13,95 @@ sellerRouter.use(
 );
 
 /**
+ * Generate a unique temporary seller handle.
+ *
+ * The seller can later change this from the seller profile.
+ */
+async function generateSellerHandle(
+  userId: string,
+  name?: string | null
+): Promise<string> {
+  const base =
+    (name || "seller")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "")
+      .slice(0, 18) || "seller";
+
+  let handle = `${base}_${userId.slice(-6).toLowerCase()}`;
+
+  let existing =
+    await prisma.sellerProfile.findUnique({
+      where: { handle },
+    });
+
+  let counter = 1;
+
+  while (existing) {
+    handle = `${base}_${userId
+      .slice(-6)
+      .toLowerCase()}_${counter}`;
+
+    existing =
+      await prisma.sellerProfile.findUnique({
+        where: { handle },
+      });
+
+    counter++;
+  }
+
+  return handle;
+}
+
+/**
+ * Make sure every SELLER/ADMIN has a SellerProfile.
+ *
+ * A seller can exist without a payout number.
+ * paymentNumber is therefore allowed to remain null
+ * until the seller configures it.
+ */
+async function ensureSellerProfile(
+  userId: string
+) {
+  const existing =
+    await prisma.sellerProfile.findUnique({
+      where: { userId },
+      include: {
+        user: true,
+      },
+    });
+
+  if (existing) {
+    return existing;
+  }
+
+  const user =
+    await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  const handle =
+    await generateSellerHandle(
+      user.id,
+      user.name
+    );
+
+  return prisma.sellerProfile.create({
+    data: {
+      userId: user.id,
+      handle,
+      paymentNumber: null,
+    },
+    include: {
+      user: true,
+    },
+  });
+}
+
+/**
  * Seller dashboard
  *
  * FREE sellers can access their dashboard.
@@ -23,17 +112,24 @@ sellerRouter.get(
   async (req, res, next) => {
     try {
       const seller =
+        await ensureSellerProfile(
+          req.user!.userId
+        );
+
+      const fullSeller =
         await prisma.sellerProfile.findUnique({
           where: {
-            userId: req.user!.userId,
+            id: seller.id,
           },
           include: {
             user: true,
+
             products: {
               orderBy: {
                 createdAt: "desc",
               },
             },
+
             payouts: {
               orderBy: {
                 createdAt: "desc",
@@ -43,7 +139,7 @@ sellerRouter.get(
           },
         });
 
-      if (!seller) {
+      if (!fullSeller) {
         return res.status(404).json({
           error: "Seller profile not found",
           code: "SELLER_PROFILE_REQUIRED",
@@ -56,22 +152,26 @@ sellerRouter.get(
             items: {
               some: {
                 product: {
-                  sellerId: seller.id,
+                  sellerId: fullSeller.id,
                 },
               },
             },
           },
+
           include: {
             items: {
               include: {
                 product: true,
               },
             },
+
             payments: true,
           },
+
           orderBy: {
             createdAt: "desc",
           },
+
           take: 50,
         });
 
@@ -79,21 +179,26 @@ sellerRouter.get(
         await prisma.subscription.findFirst({
           where: {
             userId: req.user!.userId,
+
             status: "ACTIVE",
+
             endsAt: {
               gt: new Date(),
             },
           },
+
           orderBy: {
             endsAt: "desc",
           },
         });
 
       res.json({
-        seller,
+        seller: fullSeller,
         orders,
-        premium: Boolean(activeSubscription),
-        subscription: activeSubscription,
+        premium:
+          Boolean(activeSubscription),
+        subscription:
+          activeSubscription,
       });
     } catch (e) {
       next(e);
@@ -104,7 +209,11 @@ sellerRouter.get(
 /**
  * Create/update seller profile
  *
- * This is available to FREE sellers.
+ * Available to FREE sellers.
+ *
+ * paymentNumber is optional while creating
+ * the seller profile, but when supplied it is
+ * normalized before storage.
  */
 sellerRouter.post(
   "/profile",
@@ -121,13 +230,19 @@ sellerRouter.post(
               "Handle can only contain lowercase letters, numbers and underscores"
             ),
 
-          paymentNumber: z.string(),
+          paymentNumber: z
+            .string()
+            .optional()
+            .or(z.literal("")),
         })
         .parse(req.body);
 
-      const phone = normalizePhone(
+      const paymentNumber =
         body.paymentNumber
-      );
+          ? normalizePhone(
+              body.paymentNumber
+            )
+          : null;
 
       const existing =
         await prisma.sellerProfile.findUnique({
@@ -145,10 +260,12 @@ sellerRouter.post(
 
       if (
         handleOwner &&
-        handleOwner.userId !== req.user!.userId
+        handleOwner.userId !==
+          req.user!.userId
       ) {
         return res.status(409).json({
-          error: "Seller handle is already taken",
+          error:
+            "Seller handle is already taken",
         });
       }
 
@@ -157,16 +274,19 @@ sellerRouter.post(
             where: {
               id: existing.id,
             },
+
             data: {
               handle: body.handle,
-              paymentNumber: phone,
+              paymentNumber,
             },
           })
         : await prisma.sellerProfile.create({
             data: {
-              userId: req.user!.userId,
-              handle: body.handle,
-              paymentNumber: phone,
+              userId:
+                req.user!.userId,
+              handle:
+                body.handle,
+              paymentNumber,
             },
           });
 
@@ -191,6 +311,7 @@ sellerRouter.get(
           where: {
             userId: req.user!.userId,
           },
+
           select: {
             balanceCents: true,
             pendingCents: true,
@@ -201,16 +322,23 @@ sellerRouter.get(
 
       if (!seller) {
         return res.status(404).json({
-          error: "Seller profile not found",
+          error:
+            "Seller profile not found",
         });
       }
 
       res.json({
-        balanceCents: seller.balanceCents,
-        pendingCents: seller.pendingCents,
+        balanceCents:
+          seller.balanceCents,
+
+        pendingCents:
+          seller.pendingCents,
+
         lifetimeSalesCents:
           seller.lifetimeSalesCents,
-        totalOrders: seller.totalOrders,
+
+        totalOrders:
+          seller.totalOrders,
 
         balanceKes:
           seller.balanceCents / 100,
@@ -219,7 +347,8 @@ sellerRouter.get(
           seller.pendingCents / 100,
 
         lifetimeSalesKes:
-          seller.lifetimeSalesCents / 100,
+          seller.lifetimeSalesCents /
+          100,
       });
     } catch (e) {
       next(e);
@@ -230,7 +359,8 @@ sellerRouter.get(
 /**
  * Seller payout
  *
- * FREE sellers can withdraw their available balance.
+ * FREE sellers can withdraw their
+ * available balance.
  */
 sellerRouter.post(
   "/payout",
@@ -254,7 +384,8 @@ sellerRouter.post(
 
       if (!seller) {
         return res.status(404).json({
-          error: "Seller profile not found",
+          error:
+            "Seller profile not found",
         });
       }
 
@@ -298,11 +429,14 @@ sellerRouter.post(
 
             return tx.payout.create({
               data: {
-                sellerId: seller.id,
+                sellerId:
+                  seller.id,
+
                 amountCents:
                   body.amountCents,
+
                 phone:
-                  seller.paymentNumber,
+                  seller.paymentNumber!,
               },
             });
           }
@@ -321,6 +455,7 @@ sellerRouter.post(
             where: {
               id: payout.id,
             },
+
             data: {
               status: "FAILED",
             },
@@ -330,6 +465,7 @@ sellerRouter.post(
             where: {
               id: seller.id,
             },
+
             data: {
               pendingCents: {
                 decrement:
