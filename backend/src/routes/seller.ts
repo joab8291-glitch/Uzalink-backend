@@ -221,6 +221,8 @@ sellerRouter.post(
     try {
       const body = z
         .object({
+          bio: z.string().max(1000).optional().or(z.literal("")),
+          avatarUrl: z.string().url().max(500).optional().or(z.literal("")),
           handle: z
             .string()
             .min(3)
@@ -278,6 +280,8 @@ sellerRouter.post(
             data: {
               handle: body.handle,
               paymentNumber,
+              bio: body.bio || null,
+              avatarUrl: body.avatarUrl || null,
             },
           })
         : await prisma.sellerProfile.create({
