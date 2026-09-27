@@ -508,18 +508,21 @@ adminRouter.post("/payouts/:id/mark-paid", async (req, res, next) => {
     if (payout.status === "FAILED") return res.status(409).json({ error: "Failed payouts must be re-created so the seller balance can be reserved again." });
 
     const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.payout.update({
-        where: { id: payout.id },
+      const claimed = await tx.payout.updateMany({
+        where: { id: payout.id, status: { in: ["PENDING", "PROCESSING"] } },
         data: {
           status: "PAID",
           processedAt: new Date(),
           reference: req.body?.reference || payout.reference,
         },
       });
-      await tx.sellerProfile.update({
-        where: { id: payout.sellerId },
+      if (claimed.count !== 1) throw new Error("Payout has already been settled");
+      const row = await tx.payout.findUniqueOrThrow({ where: { id: payout.id } });
+      const seller = await tx.sellerProfile.updateMany({
+        where: { id: payout.sellerId, pendingCents: { gte: payout.amountCents } },
         data: { pendingCents: { decrement: payout.amountCents } },
       });
+      if (seller.count !== 1) throw new Error("Seller pending balance is inconsistent");
       return row;
     });
 
