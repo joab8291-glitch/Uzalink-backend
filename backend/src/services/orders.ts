@@ -155,25 +155,26 @@ export async function fulfillPaidOrder(
             },
           });
 
-          if (completed.count !== 1) continue;
-          const referrer = await tx.user.findUnique({
-            where: { id: referral.referrerId },
-            include: { seller: true },
-          });
-          const rate = referrer?.seller?.affiliateEnabled
-            ? Math.max(0, Math.min(20, referrer.seller.affiliateRate))
-            : 0;
-          const reward = Math.floor(item.sellerNetCents * rate / 100);
-
-          if (reward > 0) {
-            await tx.affiliateCommission.create({
-              data: {
-                referralId: referral.id,
-                affiliateId: referral.referrerId,
-                orderId: order.id,
-                amountCents: reward,
-              },
+          if (completed.count === 1) {
+            const referrer = await tx.user.findUnique({
+              where: { id: referral.referrerId },
+              include: { seller: true },
             });
+            const rate = referrer?.seller?.affiliateEnabled
+              ? Math.max(0, Math.min(20, referrer.seller.affiliateRate))
+              : 0;
+            const reward = Math.floor(item.sellerNetCents * rate / 100);
+
+            if (reward > 0) {
+              await tx.affiliateCommission.create({
+                data: {
+                  referralId: referral.id,
+                  affiliateId: referral.referrerId,
+                  orderId: order.id,
+                  amountCents: reward,
+                },
+              });
+            }
           }
         }
       }
