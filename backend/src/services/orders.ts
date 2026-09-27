@@ -112,6 +112,18 @@ export async function fulfillPaidOrder(
     await tx.payment.update({ where: { id: paymentId }, data: { status: "SUCCESS", receipt } });
     await tx.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } });
 
+    if (referralId && buyerId) {
+      const referral = await tx.referral.findUnique({ where: { id: referralId } });
+      if (referral) {
+        const referrer = await tx.user.findUnique({ where: { id: referral.referrerId }, include: { seller: true } });
+        const rate = referrer?.seller?.affiliateEnabled ? Math.max(0, Math.min(20, referrer.seller.affiliateRate)) : 0;
+        const reward = Math.floor(item.sellerNetCents * rate / 100);
+        if (reward > 0) {
+          await tx.affiliateCommission.create({ data: { referralId: referral.id, affiliateId: referral.referrerId, orderId: order.id, amountCents: reward } });
+        }
+      }
+    }
+
     await tx.sellerProfile.update({
       where: { id: seller.id },
       data: { balanceCents: { increment: item.sellerNetCents }, lifetimeSalesCents: { increment: item.sellerNetCents }, totalOrders: { increment: 1 } },
