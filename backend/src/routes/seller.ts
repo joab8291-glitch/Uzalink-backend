@@ -109,6 +109,11 @@ async function ensureSellerProfile(
  */
 sellerRouter.get(
   "/dashboard",
+  async (req: any, res: any, next: any) => {
+    const active = await prisma.subscription.findFirst({ where: { userId: req.user!.userId, status: "ACTIVE", endsAt: { gt: new Date() } } });
+    if (!active) return res.status(403).json({ error: "Premium seller access required", code: "PREMIUM_REQUIRED" });
+    next();
+  },
   async (req, res, next) => {
     try {
       const seller =
