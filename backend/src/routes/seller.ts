@@ -303,6 +303,31 @@ sellerRouter.post(
   }
 );
 
+/** Seller analytics */
+sellerRouter.get("/analytics", async (req, res, next) => {
+  try {
+    const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.userId } });
+    if (!seller) return res.status(404).json({ error: "Seller profile not found" });
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const orders = await prisma.order.findMany({
+      where: { createdAt: { gte: since }, items: { some: { product: { sellerId: seller.id } } } },
+      include: { items: { include: { product: { select: { id: true, name: true, code: true } } } } },
+      orderBy: { createdAt: "asc" }
+    });
+    const productSales = new Map<string, {name:string; code:string; orders:number; revenueCents:number}>();
+    let revenueCents = 0;
+    for (const order of orders) {
+      if (!["PAID","FULFILLED"].includes(order.status)) continue;
+      for (const item of order.items) {
+        if (item.product && (await prisma.product.count({where:{id:item.productId,sellerId:seller.id}}))) {
+          const row=productSales.get(item.productId)||{name:item.product.name,code:item.product.code,orders:0,revenueCents:0};
+          row.orders += item.quantity; row.revenueCents += item.sellerNetCents; productSales.set(item.productId,row); revenueCents += item.sellerNetCents;
+        }
+      }
+    }
+    res.json({ periodDays: 30, revenueCents, revenueKes: revenueCents/100, orderCount: orders.filter(o=>["PAID","FULFILLED"].includes(o.status)).length, products: [...productSales.values()].sort((a,b)=>b.revenueCents-a.revenueCents) });
+  } catch(e){ next(e); }
+});
 /**
  * Seller balance
  */
