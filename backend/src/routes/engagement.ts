@@ -71,10 +71,11 @@ engagementRouter.post("/sellers/:sellerId/follow", requireAuth, async (req, res,
     if (req.user!.id === req.params.sellerId) return res.status(400).json({ error: "You cannot follow yourself" });
     const seller = await prisma.user.findFirst({ where: { id: req.params.sellerId, role: "SELLER" } });
     if (!seller) return res.status(404).json({ error: "Seller not found" });
-    const existing = await prisma.sellerFollow.findUnique({ where: { followerId_sellerId: { followerId: req.user!.id, sellerId: seller.id } } });
-    if (!existing) {
+    try {
       await prisma.sellerFollow.create({ data: { followerId: req.user!.id, sellerId: seller.id } });
       await prisma.sellerProfile.updateMany({ where: { userId: seller.id }, data: { followersCount: { increment: 1 } } });
+    } catch (error: any) {
+      if (error?.code !== "P2002") throw error;
     }
     res.status(201).json({ following: true });
   } catch (e) { next(e); }
