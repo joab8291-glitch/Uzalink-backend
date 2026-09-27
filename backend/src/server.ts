@@ -141,7 +141,6 @@ app.use("/api/messages", messagingRouter);
 
 /* =========================================================
    ERROR HANDLER
-   TEMPORARY DIAGNOSTIC VERSION
 ========================================================= */
 
 app.use(
@@ -151,18 +150,17 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
-    console.error("========================================");
-    console.error("[SERVER ERROR]");
-    console.error("METHOD:", req.method);
-    console.error("URL:", req.originalUrl);
-    console.error("BODY:", req.body);
-    console.error("ERROR:", err);
-    console.error("MESSAGE:", err?.message);
-    console.error("STACK:", err?.stack);
-    console.error("========================================");
+    console.error("[SERVER ERROR]", {
+      method: req.method,
+      url: req.originalUrl,
+      message: err?.message,
+      stack: process.env.NODE_ENV === "production" ? undefined : err?.stack,
+    });
 
     res.status(err?.statusCode || 500).json({
-      error: err?.message || "Server error",
+      error: process.env.NODE_ENV === "production"
+        ? "Server error"
+        : err?.message || "Server error",
     });
   }
 );
