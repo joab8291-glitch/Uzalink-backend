@@ -149,6 +149,8 @@ export async function fulfillPaidOrder(
 
   if (order.buyerEmail) await sendEmail(order.buyerId ?? undefined, order.buyerEmail, "UzaLink payment confirmed", `Your payment for ${item.product.name} was confirmed. Order ${order.publicId}.${download}`);
   if (order.buyerPhone) await sendSms(order.buyerId ?? undefined, order.buyerPhone, `UzaLink: payment confirmed for ${item.product.name}. Order ${order.publicId}.`);
+  if (item.product.seller?.user?.email) await sendEmail(item.product.seller.user.id, item.product.seller.user.email, "UzaLink: new sale", `You received a sale for ${item.product.name}. Order ${order.publicId}. Seller net: KSh ${(item.sellerNetCents / 100).toLocaleString()}.`).catch(() => {});
+  if (item.product.seller?.user?.phone) await sendSms(item.product.seller.user.id, item.product.seller.user.phone, `UzaLink: new sale for ${item.product.name}. Order ${order.publicId}.`).catch(() => {});
   return order;
 }
 
