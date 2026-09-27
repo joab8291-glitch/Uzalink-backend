@@ -57,7 +57,21 @@ async function ensureActiveSellerProfiles() {
   });
 }
 
-adminRouter.get("/dashboard", async (_req, res, next) => {
+
+adminRouter.get("/notifications", async (_req, res, next) => {
+  try {
+    const notifications = await prisma.notification.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ notifications });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/audit-logs", async (_req, res, next) => {
+  try {
+    const logs = await prisma.auditLog.findMany({ include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ logs });
+  } catch (e) { next(e); }
+});
+\nadminRouter.get("/dashboard", async (_req, res, next) => {
   try {
     const legacyProfiles = await prisma.sellerProfile.findMany({
       where: { user: { role: { not: "SELLER" } } },
