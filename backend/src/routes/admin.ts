@@ -106,7 +106,12 @@ adminRouter.post("/affiliates/:id/pay", async (req, res, next) => {
     const row = await prisma.affiliateCommission.findUnique({ where: { id: req.params.id } });
     if (!row) return res.status(404).json({ error: "Affiliate commission not found" });
     if (row.status === "PAID") return res.status(409).json({ error: "Commission already paid" });
-    const updated = await prisma.affiliateCommission.update({ where: { id: row.id }, data: { status: "PAID", paidAt: new Date() } });
+    const claimed = await prisma.affiliateCommission.updateMany({
+      where: { id: row.id, status: { not: "PAID" } },
+      data: { status: "PAID", paidAt: new Date() },
+    });
+    if (claimed.count !== 1) return res.status(409).json({ error: "Commission has already been settled" });
+    const updated = await prisma.affiliateCommission.findUniqueOrThrow({ where: { id: row.id } });
     res.json({ commission: updated });
   } catch (e) { next(e); }
 });
