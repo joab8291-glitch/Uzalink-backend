@@ -114,20 +114,26 @@ export async function fulfillPaidOrder(
       });
       if (!existingRedemption) {
         const coupon = await tx.coupon.findUnique({ where: { id: metadata.couponId } });
-        if (coupon && coupon.active && (coupon.maxRedemptions === null || coupon.redeemedCount < coupon.maxRedemptions)) {
-          await tx.couponRedemption.create({
-            data: {
-              couponId: coupon.id,
-              userId: order.buyerId,
-              productId: item.product.id,
-              orderId: order.id,
-              amountSavedCents: Math.max(0, item.product.priceCents - item.unitPriceCents),
+        if (coupon && coupon.active) {
+          const redemption = await tx.coupon.updateMany({
+            where: {
+              id: coupon.id,
+              active: true,
+              ...(coupon.maxRedemptions === null ? {} : { redeemedCount: { lt: coupon.maxRedemptions } }),
             },
-          });
-          await tx.coupon.update({
-            where: { id: coupon.id },
             data: { redeemedCount: { increment: 1 } },
           });
+          if (redemption.count === 1) {
+            await tx.couponRedemption.create({
+              data: {
+                couponId: coupon.id,
+                userId: order.buyerId,
+                productId: item.product.id,
+                orderId: order.id,
+                amountSavedCents: Math.max(0, item.product.priceCents - item.unitPriceCents),
+              },
+            });
+          }
         }
       }
     }
