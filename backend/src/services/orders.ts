@@ -146,8 +146,8 @@ export async function fulfillPaidOrder(
         const referral = await tx.referral.findUnique({ where: { code: referralCode } });
 
         if (referral && referral.status === "PENDING" && referral.referrerId !== order.buyerId) {
-          await tx.referral.update({
-            where: { id: referral.id },
+          const completed = await tx.referral.updateMany({
+            where: { id: referral.id, status: "PENDING", referrerId: { not: order.buyerId } },
             data: {
               referredId: order.buyerId,
               status: "COMPLETED",
@@ -155,6 +155,7 @@ export async function fulfillPaidOrder(
             },
           });
 
+          if (completed.count !== 1) continue;
           const referrer = await tx.user.findUnique({
             where: { id: referral.referrerId },
             include: { seller: true },
