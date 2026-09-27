@@ -8,50 +8,147 @@ export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireRole("ADMIN"));
 
+async function ensureActiveSellerProfiles() {
+  const sellerUsers = await prisma.user.findMany({
+    where: { role: "SELLER" },
+    select: { id: true, name: true },
+  });
+
+  for (const user of sellerUsers) {
+    const existing = await prisma.sellerProfile.findUnique({
+      where: { userId: user.id },
+    });
+
+    if (existing) continue;
+
+    const base =
+      (user.name || "seller")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+        .slice(0, 18) || "seller";
+
+    let handle = `${base}_${user.id.slice(-6).toLowerCase()}`;
+    let suffix = 1;
+
+    while (await prisma.sellerProfile.findUnique({ where: { handle } })) {
+      handle = `${base}_${user.id.slice(-6).toLowerCase()}_${suffix++}`;
+    }
+
+    await prisma.sellerProfile.create({
+      data: { userId: user.id, handle },
+    });
+  }
+
+  return prisma.sellerProfile.findMany({
+    where: { user: { role: "SELLER" } },
+    include: {
+      user: true,
+      products: {
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+      },
+      payouts: {
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+}
+
 adminRouter.get("/dashboard", async (_req, res, next) => {
   try {
-    const [users, sellers, products, orders, payouts, revenue, userRows, sellerRows, productRows, payoutRows, orderRows] =
-      await Promise.all([
-        prisma.user.count(),
-        prisma.sellerProfile.count(),
-        prisma.product.count(),
-        prisma.order.count(),
-        prisma.payout.count(),
-        prisma.order.aggregate({
-          where: { status: { in: ["PAID", "FULFILLED"] } },
-          _sum: { amountCents: true, commissionCents: true, sellerNetCents: true },
-        }),
-        prisma.user.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
-        prisma.sellerProfile.findMany({
-          include: { user: true, products: true, payouts: { orderBy: { createdAt: "desc" }, take: 20 } },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        }),
-        prisma.product.findMany({
-          include: { seller: { include: { user: true } } },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        }),
-        prisma.payout.findMany({
-          include: { seller: { include: { user: true } } },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        }),
-        prisma.order.findMany({
-          include: {
-            buyer: true,
-            items: { include: { product: { include: { seller: { include: { user: true } } } } } },
-            payments: true,
+    const legacyProfiles = await prisma.sellerProfile.findMany({
+      where: { user: { role: { not: "SELLER" } } },
+      select: { id: true },
+    });
+
+    if (legacyProfiles.length) {
+      await prisma.product.updateMany({
+        where: {
+          sellerId: { in: legacyProfiles.map((profile) => profile.id) },
+          status: "ACTIVE",
+        },
+        data: { status: "DRAFT" },
+      });
+    }
+
+    const sellerRows = await ensureActiveSellerProfiles();
+
+    const [
+      users,
+      products,
+      orders,
+      payouts,
+      revenue,
+      userRows,
+      productRows,
+      payoutRows,
+      orderRows,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.product.count({
+        where: {
+          status: "ACTIVE",
+          kind: "DIGITAL",
+          seller: { user: { role: "SELLER" } },
+        },
+      }),
+      prisma.order.count(),
+      prisma.payout.count(),
+      prisma.order.aggregate({
+        where: { status: { in: ["PAID", "FULFILLED"] } },
+        _sum: {
+          amountCents: true,
+          commissionCents: true,
+          sellerNetCents: true,
+        },
+      }),
+      prisma.user.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      prisma.product.findMany({
+        where: {
+          status: "ACTIVE",
+          kind: "DIGITAL",
+          seller: { user: { role: "SELLER" } },
+        },
+        include: {
+          seller: { include: { user: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      prisma.payout.findMany({
+        include: { seller: { include: { user: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      prisma.order.findMany({
+        include: {
+          buyer: true,
+          items: {
+            include: {
+              product: {
+                include: {
+                  seller: { include: { user: true } },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        }),
-      ]);
+          payments: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+    ]);
 
     res.json({
       stats: {
         users,
-        sellers,
+        sellers: sellerRows.length,
         products,
         orders,
         payouts,
@@ -112,6 +209,12 @@ adminRouter.post("/payouts/:id/send-mpesa", async (req, res, next) => {
       return res.status(404).json({ error: "Payout not found" });
     }
 
+    if (payout.seller.user.role !== "SELLER") {
+      return res.status(403).json({
+        error: "This payout belongs to an inactive seller account.",
+      });
+    }
+
     if (payout.status === "PAID") {
       return res.status(409).json({ error: "This payout has already been paid." });
     }
@@ -169,6 +272,12 @@ adminRouter.post("/payouts", async (req, res, next) => {
 
     if (!seller) {
       return res.status(404).json({ error: "Author/seller not found." });
+    }
+
+    if (seller.user.role !== "SELLER") {
+      return res.status(403).json({
+        error: "Only active SELLER accounts can receive author payouts.",
+      });
     }
 
     if (!seller.paymentNumber) {
