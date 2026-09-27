@@ -79,7 +79,7 @@ export async function createOrder(
       include: { items: true },
     });
 
-    if (referralId && buyerId) {\n      await tx.referral.update({ where: { id: referralId }, data: { referredId: buyerId, status: "COMPLETED", completedAt: new Date() } });\n    }\n\n    if (couponId) {
+    if (couponId) {
       await tx.couponRedemption.create({
         data: { couponId, userId: buyerId, productId: product.id, orderId: order.id, amountSavedCents },
       });
