@@ -149,7 +149,7 @@ adminRouter.patch("/fraud-flags/:id", async (req, res, next) => {
     res.json({ flag });
   } catch (e) { next(e); }
 });
-\nadminRouter.get("/notifications", async (_req, res, next) => {
+adminRouter.get("/notifications", async (_req, res, next) => {
   try {
     const notifications = await prisma.notification.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     res.json({ notifications });
@@ -162,7 +162,7 @@ adminRouter.get("/audit-logs", async (_req, res, next) => {
     res.json({ logs });
   } catch (e) { next(e); }
 });
-\nadminRouter.get("/dashboard", async (_req, res, next) => {
+adminRouter.get("/dashboard", async (_req, res, next) => {
   try {
     const legacyProfiles = await prisma.sellerProfile.findMany({
       where: { user: { role: { not: "SELLER" } } },
@@ -335,7 +335,7 @@ adminRouter.patch("/reviews/:id", async (req, res, next) => {
     res.json({ review });
   } catch (e) { next(e); }
 });
-\nadminRouter.post("/products/:id/status", async (req, res, next) => {
+adminRouter.post("/products/:id/status", async (req, res, next) => {
   try {
     const status = req.body?.status;
     if (!["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"].includes(status)) {
