@@ -17,7 +17,10 @@ export const productRouter = Router();
 productRouter.get("/:code/cover", async (req, res, next) => {
   try {
     const product = await prisma.product.findUnique({
-      where: { code: req.params.code },
+      where: {
+        code: req.params.code,
+        seller: { user: { role: "SELLER" } },
+      },
     });
 
     if (!product || product.status !== "ACTIVE") {
@@ -77,7 +80,11 @@ productRouter.get("/:code/cover", async (req, res, next) => {
 productRouter.get("/", async (_req, res, next) => {
   try {
     const products = await prisma.product.findMany({
-      where: { status: "ACTIVE", kind: "DIGITAL" },
+      where: {
+        status: "ACTIVE",
+        kind: "DIGITAL",
+        seller: { user: { role: "SELLER" } },
+      },
       include: {
         seller: {
           select: {
@@ -99,7 +106,10 @@ productRouter.get("/", async (_req, res, next) => {
 productRouter.get("/:code", async (req, res, next) => {
   try {
     const product = await prisma.product.findUnique({
-      where: { code: req.params.code },
+      where: {
+        code: req.params.code,
+        seller: { user: { role: "SELLER" } },
+      },
       include: {
         seller: {
           select: {
@@ -124,7 +134,7 @@ productRouter.get("/:code", async (req, res, next) => {
 productRouter.post(
   "/",
   requireAuth,
-  requireRole("SELLER", "ADMIN"),
+  requireRole("SELLER"),
   upload.fields([
     { name: "file", maxCount: 1 },
     { name: "cover", maxCount: 1 },
