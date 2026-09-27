@@ -177,10 +177,18 @@ export async function fulfillPaidOrder(
       data: { balanceCents: { increment: item.sellerNetCents }, lifetimeSalesCents: { increment: item.sellerNetCents }, totalOrders: { increment: 1 } },
     });
 
-    await tx.product.update({
-      where: { id: item.product.id },
-      data: { salesCount: { increment: 1 }, inventory: item.product.inventory === null ? null : Math.max(0, item.product.inventory - 1) },
-    });
+    if (item.product.inventory !== null) {
+      const stock = await tx.product.updateMany({
+        where: { id: item.product.id, inventory: { gt: 0 } },
+        data: { salesCount: { increment: 1 }, inventory: { decrement: 1 } },
+      });
+      if (stock.count !== 1) throw new Error("Product is out of stock");
+    } else {
+      await tx.product.update({
+        where: { id: item.product.id },
+        data: { salesCount: { increment: 1 } },
+      });
+    }
 
     if (item.product.kind === "BOOKING" || item.product.kind === "SERVICE") {
       await tx.booking.upsert({ where: { orderId: order.id }, update: {}, create: { orderId: order.id, productId: item.product.id, status: "CONFIRMED" } });
