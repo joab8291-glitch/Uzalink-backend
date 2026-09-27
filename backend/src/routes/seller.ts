@@ -9,7 +9,7 @@ export const sellerRouter = Router();
 
 sellerRouter.use(
   requireAuth,
-  requireRole("SELLER", "ADMIN")
+  requireRole("SELLER")
 );
 
 /**
