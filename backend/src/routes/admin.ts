@@ -497,6 +497,7 @@ adminRouter.post("/payouts/:id/mark-paid", async (req, res, next) => {
     const payout = await prisma.payout.findUnique({ where: { id: req.params.id } });
     if (!payout) return res.status(404).json({ error: "Payout not found" });
     if (payout.status === "PAID") return res.json({ payout });
+    if (payout.status === "FAILED") return res.status(409).json({ error: "Failed payouts must be re-created so the seller balance can be reserved again." });
 
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.payout.update({
