@@ -74,6 +74,21 @@ enum NotificationChannel {
   SMS
 }
 
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  PROCESSING
+  REFUNDED
+  REJECTED
+}
+
+enum FraudStatus {
+  OPEN
+  REVIEWED
+  CLEARED
+  BLOCKED
+}
+
 model User {
   id String @id @default(cuid())
   email String? @unique
@@ -90,6 +105,7 @@ model User {
   downloadGrants DownloadGrant[]
   notifications Notification[]
   auditLogs AuditLog[]
+  fraudFlags FraudFlag[]
   reviews Review[]
   wishlist Wishlist[]
   following SellerFollow[] @relation("Follower")
@@ -203,6 +219,8 @@ model Order {
   delivery Delivery?
   reviews Review[]
   couponRedemptions CouponRedemption[]
+  refunds Refund[]
+  fraudFlags FraudFlag[]
   @@index([buyerId, createdAt])
   @@index([status, createdAt])
 }
@@ -431,4 +449,35 @@ model Referral {
   referrer User @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
   referred User? @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: SetNull)
   @@index([referrerId, status])
+}
+
+
+model Refund {
+  id String @id @default(cuid())
+  orderId String
+  amountCents Int
+  reason String
+  status RefundStatus @default(REQUESTED)
+  adminNote String?
+  processedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  @@index([orderId, status])
+}
+
+model FraudFlag {
+  id String @id @default(cuid())
+  orderId String?
+  userId String?
+  reason String
+  score Int @default(0)
+  status FraudStatus @default(OPEN)
+  metadata Json?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([status, createdAt])
+  @@index([orderId])
 }
