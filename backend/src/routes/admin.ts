@@ -184,7 +184,53 @@ adminRouter.get("/orders", async (_req, res, next) => {
   }
 });
 
-adminRouter.post("/products/:id/status", async (req, res, next) => {
+
+adminRouter.patch("/products/:id/featured", async (req, res, next) => {
+  try {
+    const featured = Boolean(req.body?.featured);
+    const product = await prisma.product.update({ where: { id: req.params.id }, data: { featured } });
+    res.json({ product });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/sellers/:id/featured", async (req, res, next) => {
+  try {
+    const featured = Boolean(req.body?.featured);
+    const seller = await prisma.sellerProfile.update({ where: { id: req.params.id }, data: { featured } });
+    res.json({ seller });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/sellers/:id/verification", async (req, res, next) => {
+  try {
+    const verified = Boolean(req.body?.verified);
+    const seller = await prisma.sellerProfile.update({
+      where: { id: req.params.id },
+      data: { verifiedAt: verified ? new Date() : null, verificationNote: req.body?.note ? String(req.body.note).slice(0, 500) : null },
+    });
+    res.json({ seller });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/reviews", async (_req, res, next) => {
+  try {
+    const reviews = await prisma.review.findMany({
+      include: { user: { select: { id: true, name: true, email: true } }, product: { select: { id: true, code: true, name: true } } },
+      orderBy: { createdAt: "desc" }, take: 200,
+    });
+    res.json({ reviews });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/reviews/:id", async (req, res, next) => {
+  try {
+    const review = await prisma.review.update({ where: { id: req.params.id }, data: { approved: Boolean(req.body?.approved) } });
+    const aggregate = await prisma.review.aggregate({ where: { productId: review.productId, approved: true }, _avg: { rating: true } });
+    await prisma.product.update({ where: { id: review.productId }, data: { rating: aggregate._avg.rating ?? 0 } });
+    res.json({ review });
+  } catch (e) { next(e); }
+});
+\nadminRouter.post("/products/:id/status", async (req, res, next) => {
   try {
     const status = req.body?.status;
     if (!["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"].includes(status)) {
