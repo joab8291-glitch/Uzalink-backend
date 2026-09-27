@@ -311,6 +311,8 @@ sellerRouter.post(
 /** Seller analytics */
 sellerRouter.get("/analytics", async (req, res, next) => {
   try {
+    const active = await prisma.subscription.findFirst({ where: { userId: req.user!.userId, status: "ACTIVE", endsAt: { gt: new Date() } } });
+    if (!active) return res.status(403).json({ error: "Premium seller access required", code: "PREMIUM_REQUIRED" });
     const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.userId } });
     if (!seller) return res.status(404).json({ error: "Seller profile not found" });
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
