@@ -69,7 +69,7 @@ export async function createOrder(
         buyerName: buyer.name,
         buyerPhone: buyer.phone,
         buyerEmail: buyer.email,
-        metadata: buyer.address ? { address: buyer.address } : undefined,
+        metadata: buyer.address || referralId ? { ...(buyer.address ? { address: buyer.address } : {}), ...(referralId ? { referralCode: referralCode!.trim().toUpperCase() } : {}) } : undefined,
         amountCents: finalPrice,
         commissionCents: commission,
         sellerNetCents: sellerNet,
@@ -113,12 +113,42 @@ export async function fulfillPaidOrder(
     await tx.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } });
 
     if (order.buyerId) {
-      const referral = await tx.referral.findFirst({ where: { referredId: order.buyerId, status: "COMPLETED" }, orderBy: { completedAt: "desc" } });
-      if (referral) {
-        const referrer = await tx.user.findUnique({ where: { id: referral.referrerId }, include: { seller: true } });
-        const rate = referrer?.seller?.affiliateEnabled ? Math.max(0, Math.min(20, referrer.seller.affiliateRate)) : 0;
-        const reward = Math.floor(item.sellerNetCents * rate / 100);
-        if (reward > 0) await tx.affiliateCommission.create({ data: { referralId: referral.id, affiliateId: referral.referrerId, orderId: order.id, amountCents: reward } });
+      const metadata = (order.metadata || {}) as { referralCode?: string };
+      const referralCode = metadata.referralCode?.trim().toUpperCase();
+
+      if (referralCode) {
+        const referral = await tx.referral.findUnique({ where: { code: referralCode } });
+
+        if (referral && referral.status === "PENDING" && referral.referrerId !== order.buyerId) {
+          await tx.referral.update({
+            where: { id: referral.id },
+            data: {
+              referredId: order.buyerId,
+              status: "COMPLETED",
+              completedAt: new Date(),
+            },
+          });
+
+          const referrer = await tx.user.findUnique({
+            where: { id: referral.referrerId },
+            include: { seller: true },
+          });
+          const rate = referrer?.seller?.affiliateEnabled
+            ? Math.max(0, Math.min(20, referrer.seller.affiliateRate))
+            : 0;
+          const reward = Math.floor(item.sellerNetCents * rate / 100);
+
+          if (reward > 0) {
+            await tx.affiliateCommission.create({
+              data: {
+                referralId: referral.id,
+                affiliateId: referral.referrerId,
+                orderId: order.id,
+                amountCents: reward,
+              },
+            });
+          }
+        }
       }
     }
 
