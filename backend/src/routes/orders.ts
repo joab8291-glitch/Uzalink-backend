@@ -157,7 +157,7 @@ orderRouter.get("/:id", async (req, res, next) => {
         payments: {
           select: {
             status: true,
-            errorMessage: true,
+            resultDescription: true,
             resultCode: true,
           },
           orderBy: { createdAt: "desc" },
