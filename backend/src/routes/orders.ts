@@ -12,6 +12,7 @@ import { stkPush } from "../services/mpesa.js";
 import { requireAuth } from "../middleware/auth.js";
 import { hashToken } from "../lib/auth.js";
 import { sendEmail, sendSms } from "../services/notifications.js";
+import { inspectOrderRisk } from "../services/fraud.js";
 
 export const orderRouter = Router();
 
@@ -60,9 +61,8 @@ orderRouter.post("/", async (req, res, next) => {
       b.couponCode
     );
 
-    res.status(201).json({
-      order: o,
-    });
+    await inspectOrderRisk(o.id).catch(() => null);
+    res.status(201).json({ order: o });
   } catch (e) {
     next(e);
   }
