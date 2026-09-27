@@ -27,6 +27,7 @@ orderRouter.post("/", async (req, res, next) => {
         phone: z.string(),
         email: z.string().email().optional(),
         address: z.string().max(500).optional(),
+        couponCode: z.string().trim().min(3).max(32).optional(),
       })
       .parse(req.body);
 
@@ -54,7 +55,8 @@ orderRouter.post("/", async (req, res, next) => {
         email: b.email,
         address: b.address,
       },
-      req.user?.userId
+      req.user?.userId,
+      b.couponCode
     );
 
     res.status(201).json({
