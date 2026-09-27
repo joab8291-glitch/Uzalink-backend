@@ -341,6 +341,8 @@ sellerRouter.get("/analytics", async (req, res, next) => {
 sellerRouter.get(
   "/balance",
   async (req, res, next) => {
+    const active = await prisma.subscription.findFirst({ where: { userId: req.user!.userId, status: "ACTIVE", endsAt: { gt: new Date() } } });
+    if (!active) return res.status(403).json({ error: "Premium seller access required", code: "PREMIUM_REQUIRED" });
     try {
       const seller =
         await prisma.sellerProfile.findUnique({
