@@ -16,6 +16,7 @@ import { adminRouter } from "./routes/admin.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { payoutRouter } from "./routes/payouts.js";
 import { engagementRouter } from "./routes/engagement.js";
+import { messagingRouter } from "./routes/messaging.js";
 
 const app = express();
 
@@ -136,6 +137,7 @@ app.use("/api/subscriptions", subscriptionRouter);
 
 app.use("/api/payouts", payoutRouter);
 app.use("/api/engagement", engagementRouter);
+app.use("/api/messages", messagingRouter);
 
 /* =========================================================
    ERROR HANDLER
