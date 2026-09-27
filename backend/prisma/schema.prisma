@@ -106,13 +106,18 @@ model User {
   notifications Notification[]
   auditLogs AuditLog[]
   fraudFlags FraudFlag[]
+  messagesSent SellerMessage[] @relation("MessageSender")
+  messagesReceived SellerMessage[] @relation("MessageRecipient")
   reviews Review[]
   wishlist Wishlist[]
   following SellerFollow[] @relation("Follower")
   followers SellerFollow[] @relation("FollowedSeller")
   couponRedemptions CouponRedemption[]
+  affiliateCommissions AffiliateCommission[]
   referralsSent Referral[] @relation("ReferralReferrer")
   referralsReceived Referral[] @relation("ReferralReferred")
+  affiliateClicks AffiliateClick[]
+  affiliateCommissions AffiliateCommission[]
 }
 
 model SellerProfile {
@@ -131,6 +136,8 @@ model SellerProfile {
   verificationNote String?
   featured Boolean @default(false)
   followersCount Int @default(0)
+  affiliateRate Int @default(0)
+  affiliateEnabled Boolean @default(false)
   coupons Coupon[]
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
@@ -418,6 +425,7 @@ model Coupon {
   createdAt DateTime @default(now())
   seller SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   redemptions CouponRedemption[]
+  commissions AffiliateCommission[]
   @@index([sellerId, active])
 }
 
@@ -480,4 +488,46 @@ model FraudFlag {
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   @@index([status, createdAt])
   @@index([orderId])
+}
+
+
+model SellerMessage {
+  id String @id @default(cuid())
+  senderId String
+  recipientId String
+  subject String?
+  body String
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  sender User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient User @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  @@index([recipientId, readAt, createdAt])
+  @@index([senderId, createdAt])
+}
+
+model AffiliateClick {
+  id String @id @default(cuid())
+  code String
+  referrerId String?
+  productId String?
+  createdAt DateTime @default(now())
+  referrer User? @relation(fields: [referrerId], references: [id], onDelete: SetNull)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  @@index([code, createdAt])
+}
+
+model AffiliateCommission {
+  id String @id @default(cuid())
+  referralId String?
+  affiliateId String
+  orderId String
+  amountCents Int
+  status String @default("PENDING")
+  createdAt DateTime @default(now())
+  paidAt DateTime?
+  affiliate User @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  referral Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  @@unique([affiliateId, orderId])
+  @@index([affiliateId, status])
 }
