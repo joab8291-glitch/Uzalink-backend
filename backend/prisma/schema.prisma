@@ -113,7 +113,6 @@ model User {
   following SellerFollow[] @relation("Follower")
   followers SellerFollow[] @relation("FollowedSeller")
   couponRedemptions CouponRedemption[]
-  affiliateCommissions AffiliateCommission[]
   referralsSent Referral[] @relation("ReferralReferrer")
   referralsReceived Referral[] @relation("ReferralReferred")
   affiliateClicks AffiliateClick[]
@@ -197,6 +196,7 @@ model Product {
   downloadGrants DownloadGrant[]
   bookings Booking[]
   deliveries Delivery[]
+  affiliateClicks AffiliateClick[]
   @@index([sellerId, status])
   @@index([status, kind])
   @@index([featured, status])
@@ -425,7 +425,6 @@ model Coupon {
   createdAt DateTime @default(now())
   seller SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   redemptions CouponRedemption[]
-  commissions AffiliateCommission[]
   @@index([sellerId, active])
 }
 
