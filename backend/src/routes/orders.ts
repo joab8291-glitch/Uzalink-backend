@@ -142,28 +142,35 @@ orderRouter.post("/:id/pay", async (req, res, next) => {
 orderRouter.get("/:id", async (req, res, next) => {
   try {
     const o = await prisma.order.findUnique({
-      where: {
-        id: req.params.id,
-      },
-      include: {
-        payments: true,
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        publicId: true,
+        status: true,
         items: {
-          include: {
-            product: true,
+          select: {
+            product: {
+              select: { code: true, name: true },
+            },
           },
+        },
+        payments: {
+          select: {
+            status: true,
+            errorMessage: true,
+            resultCode: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 1,
         },
       },
     });
 
     if (!o) {
-      return res.status(404).json({
-        error: "Order not found",
-      });
+      return res.status(404).json({ error: "Order not found" });
     }
 
-    res.json({
-      order: o,
-    });
+    res.json({ order: o });
   } catch (e) {
     next(e);
   }
