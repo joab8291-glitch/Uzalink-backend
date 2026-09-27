@@ -13,7 +13,7 @@ const upload = multer({
 
 export const productRouter = Router();
 
-/** Public signed cover image. The book file remains private. */
+/** Public product cover. Digital files remain private. */
 productRouter.get("/:code/cover", async (req, res, next) => {
   try {
     const product = await prisma.product.findUnique({
@@ -24,7 +24,7 @@ productRouter.get("/:code/cover", async (req, res, next) => {
     });
 
     if (!product || product.status !== "ACTIVE") {
-      return res.status(404).json({ error: "Book cover not found" });
+      return res.status(404).json({ error: "Product cover not found" });
     }
 
     // Older published books may have an imageUrl instead of a private coverKey.
@@ -34,7 +34,7 @@ productRouter.get("/:code/cover", async (req, res, next) => {
         return res.redirect(302, product.imageUrl);
       }
 
-      return res.status(404).json({ error: "Book cover not found" });
+      return res.status(404).json({ error: "Product cover not found" });
     }
 
     const object = await getPrivateObject(product.coverKey);
@@ -57,7 +57,7 @@ productRouter.get("/:code/cover", async (req, res, next) => {
 
     if (!object.Body) {
       return res.status(404).json({
-        error: "Book cover not found",
+        error: "Product cover not found",
       });
     }
 
@@ -82,7 +82,6 @@ productRouter.get("/", async (_req, res, next) => {
     const products = await prisma.product.findMany({
       where: {
         status: "ACTIVE",
-        kind: "DIGITAL",
         seller: { user: { role: "SELLER" } },
       },
       include: {
@@ -107,7 +106,7 @@ productRouter.get("/", async (_req, res, next) => {
   }
 });
 
-/** Public single book */
+/** Public single product */
 productRouter.get("/:code", async (req, res, next) => {
   try {
     const product = await prisma.product.findUnique({
@@ -125,8 +124,8 @@ productRouter.get("/:code", async (req, res, next) => {
       },
     });
 
-    if (!product || product.status !== "ACTIVE" || product.kind !== "DIGITAL") {
-      return res.status(404).json({ error: "Book not found" });
+    if (!product || product.status !== "ACTIVE") {
+      return res.status(404).json({ error: "Product not found" });
     }
 
     res.json({ product });
@@ -135,113 +134,32 @@ productRouter.get("/:code", async (req, res, next) => {
   }
 });
 
-/** Create a digital book */
-productRouter.post(
-  "/",
-  requireAuth,
-  requireRole("SELLER"),
-  upload.fields([
-    { name: "file", maxCount: 1 },
-    { name: "cover", maxCount: 1 },
-  ]),
-  async (req, res, next) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({ error: "Authentication required" });
-      }
-
-      const seller = await prisma.sellerProfile.findUnique({
-        where: { userId: req.user.userId },
-      });
-
-      if (!seller) {
-        return res.status(403).json({
-          error: "Create your seller profile before adding products",
-          code: "SELLER_PROFILE_REQUIRED",
-        });
-      }
-
-      const body = z.object({
-        name: z.string().min(3),
-        description: z.string().min(12),
-        category: z.string().min(1),
-        kind: z.literal("DIGITAL"),
-        priceCents: z.coerce.number().int().min(5000),
-        instant: z.union([z.boolean(), z.string()])
-          .transform((value) => value === true || value === "true")
-          .default(true),
-        downloadLimit: z.coerce.number().int().min(1).max(50).default(5),
-        expiresHours: z.coerce.number().int().min(1).max(168).default(72),
-        deliveryText: z.string().optional(),
-        inventory: z.coerce.number().int().min(0).nullable().optional(),
-      }).parse(req.body);
-
-      const files = req.files as {
-        [fieldname: string]: Express.Multer.File[] | undefined;
-      } | undefined;
-
-      const bookFile = files?.file?.[0];
-      const coverFile = files?.cover?.[0];
-
-      if (!bookFile) {
-        return res.status(400).json({ error: "Digital book file is required" });
-      }
-
-      let privateFileKey: string | undefined;
-      let coverKey: string | undefined;
-
-      privateFileKey =
-        `products/${seller.id}/${crypto.randomUUID()}-${bookFile.originalname.replace(
-          /[^a-zA-Z0-9._-]/g,
-          "_"
-        )}`;
-
-      await putPrivateObject(
-        privateFileKey,
-        bookFile.buffer,
-        bookFile.mimetype
-      );
-
-      if (coverFile) {
-        coverKey =
-          `covers/${seller.id}/${crypto.randomUUID()}-${coverFile.originalname.replace(
-            /[^a-zA-Z0-9._-]/g,
-            "_"
-          )}`;
-
-        await putPrivateObject(
-          coverKey,
-          coverFile.buffer,
-          coverFile.mimetype
-        );
-      }
-
-      const product = await prisma.product.create({
-        data: {
-          name: body.name,
-          description: body.description,
-          category: body.category,
-          kind: "DIGITAL",
-          priceCents: body.priceCents,
-          instant: body.instant,
-          downloadLimit: body.downloadLimit,
-          expiresHours: body.expiresHours,
-          deliveryText: body.deliveryText,
-          inventory: body.inventory,
-          code: crypto.randomBytes(4).toString("hex"),
-          sellerId: seller.id,
-          privateFileKey,
-          fileName: bookFile.originalname,
-          fileSize: bookFile.size,
-          coverKey,
-          coverFileName: coverFile?.originalname,
-          status: "ACTIVE",
-        },
-      });
-
-      res.status(201).json({ product });
-    } catch (e) {
-      next(e);
-    }
-  }
-);
+productRouter.post("/", requireAuth, requireRole("SELLER"), upload.fields([{ name: "file", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req,res,next)=>{
+ try{
+  if(!req.user)return res.status(401).json({error:"Authentication required"});
+  const seller=await prisma.sellerProfile.findUnique({where:{userId:req.user.userId}});
+  if(!seller)return res.status(403).json({error:"Create your seller profile before adding products",code:"SELLER_PROFILE_REQUIRED"});
+  const body=z.object({
+   name:z.string().min(3),description:z.string().min(12),category:z.string().min(1),
+   kind:z.enum(["DIGITAL","SERVICE","BOOKING","EVENT","COURSE","SUBSCRIPTION","PHYSICAL","OTHER"]),
+   priceCents:z.coerce.number().int().min(5000),
+   instant:z.union([z.boolean(),z.string()]).transform(v=>v===true||v==="true").default(false),
+   downloadLimit:z.coerce.number().int().min(1).max(50).default(5),
+   expiresHours:z.coerce.number().int().min(1).max(168).default(72),
+   deliveryText:z.string().optional(),inventory:z.coerce.number().int().min(0).nullable().optional()
+  }).parse(req.body);
+  const files=req.files as {[fieldname:string]:Express.Multer.File[]|undefined}|undefined;
+  const productFile=files?.file?.[0],coverFile=files?.cover?.[0];
+  if(body.kind==="DIGITAL"&&!productFile)return res.status(400).json({error:"Digital product file is required"});
+  let privateFileKey:string|undefined,coverKey:string|undefined;
+  if(productFile){privateFileKey=`products/${seller.id}/${crypto.randomUUID()}-${productFile.originalname.replace(/[^a-zA-Z0-9._-]/g,"_")}`;await putPrivateObject(privateFileKey,productFile.buffer,productFile.mimetype);}
+  if(coverFile){coverKey=`covers/${seller.id}/${crypto.randomUUID()}-${coverFile.originalname.replace(/[^a-zA-Z0-9._-]/g,"_")}`;await putPrivateObject(coverKey,coverFile.buffer,coverFile.mimetype);}
+  const product=await prisma.product.create({data:{
+   name:body.name,description:body.description,category:body.category,kind:body.kind,priceCents:body.priceCents,
+   instant:body.kind==="DIGITAL"?body.instant:false,downloadLimit:body.downloadLimit,expiresHours:body.expiresHours,
+   deliveryText:body.deliveryText,inventory:body.inventory,code:crypto.randomBytes(4).toString("hex"),sellerId:seller.id,
+   privateFileKey,fileName:productFile?.originalname,fileSize:productFile?.size,coverKey,coverFileName:coverFile?.originalname,status:"ACTIVE"
+  }});
+  res.status(201).json({product});
+ }catch(e){next(e)}
+});
