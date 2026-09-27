@@ -15,6 +15,8 @@ import { sellerRouter } from "./routes/seller.js";
 import { adminRouter } from "./routes/admin.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { payoutRouter } from "./routes/payouts.js";
+import { engagementRouter } from "./routes/engagement.js";
+import { messagingRouter } from "./routes/messaging.js";
 
 const app = express();
 
@@ -134,10 +136,11 @@ app.use("/api/admin", adminRouter);
 app.use("/api/subscriptions", subscriptionRouter);
 
 app.use("/api/payouts", payoutRouter);
+app.use("/api/engagement", engagementRouter);
+app.use("/api/messages", messagingRouter);
 
 /* =========================================================
    ERROR HANDLER
-   TEMPORARY DIAGNOSTIC VERSION
 ========================================================= */
 
 app.use(
@@ -147,18 +150,17 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
-    console.error("========================================");
-    console.error("[SERVER ERROR]");
-    console.error("METHOD:", req.method);
-    console.error("URL:", req.originalUrl);
-    console.error("BODY:", req.body);
-    console.error("ERROR:", err);
-    console.error("MESSAGE:", err?.message);
-    console.error("STACK:", err?.stack);
-    console.error("========================================");
+    console.error("[SERVER ERROR]", {
+      method: req.method,
+      url: req.originalUrl,
+      message: err?.message,
+      stack: process.env.NODE_ENV === "production" ? undefined : err?.stack,
+    });
 
     res.status(err?.statusCode || 500).json({
-      error: err?.message || "Server error",
+      error: process.env.NODE_ENV === "production"
+        ? "Server error"
+        : err?.message || "Server error",
     });
   }
 );

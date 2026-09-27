@@ -57,6 +57,126 @@ async function ensureActiveSellerProfiles() {
   });
 }
 
+
+
+
+
+adminRouter.get("/fulfillment", async (_req, res, next) => {
+  try {
+    const [deliveries, bookings] = await Promise.all([
+      prisma.delivery.findMany({ include: { order: true, product: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+      prisma.booking.findMany({ include: { order: true, product: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+    ]);
+    res.json({ deliveries, bookings });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/deliveries/:id", async (req, res, next) => {
+  try {
+    const allowed = ["PENDING","PROCESSING","SHIPPED","DELIVERED","CANCELLED"];
+    const status = String(req.body?.status || "");
+    if (!allowed.includes(status)) return res.status(400).json({ error: "Invalid delivery status" });
+    const delivery = await prisma.delivery.update({ where: { id: req.params.id }, data: { status: status as any, trackingCode: req.body?.trackingCode ? String(req.body.trackingCode).slice(0,100) : undefined, notes: req.body?.notes ? String(req.body.notes).slice(0,1000) : undefined } });
+    res.json({ delivery });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/bookings/:id", async (req, res, next) => {
+  try {
+    const allowed = ["PENDING","CONFIRMED","COMPLETED","CANCELLED"];
+    const status = String(req.body?.status || "");
+    if (!allowed.includes(status)) return res.status(400).json({ error: "Invalid booking status" });
+    const booking = await prisma.booking.update({ where: { id: req.params.id }, data: { status: status as any, notes: req.body?.notes ? String(req.body.notes).slice(0,1000) : undefined, startsAt: req.body?.startsAt ? new Date(req.body.startsAt) : undefined, endsAt: req.body?.endsAt ? new Date(req.body.endsAt) : undefined } });
+    res.json({ booking });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/affiliates", async (_req, res, next) => {
+  try {
+    const commissions = await prisma.affiliateCommission.findMany({
+      include: { affiliate: { select: { id: true, name: true, email: true } }, order: { select: { publicId: true, amountCents: true, status: true } } },
+      orderBy: { createdAt: "desc" }, take: 200,
+    });
+    res.json({ commissions });
+  } catch (e) { next(e); }
+});
+
+adminRouter.post("/affiliates/:id/pay", async (req, res, next) => {
+  try {
+    const row = await prisma.affiliateCommission.findUnique({ where: { id: req.params.id } });
+    if (!row) return res.status(404).json({ error: "Affiliate commission not found" });
+    if (row.status === "PAID") return res.status(409).json({ error: "Commission already paid" });
+    const claimed = await prisma.affiliateCommission.updateMany({
+      where: { id: row.id, status: { not: "PAID" } },
+      data: { status: "PAID", paidAt: new Date() },
+    });
+    if (claimed.count !== 1) return res.status(409).json({ error: "Commission has already been settled" });
+    const updated = await prisma.affiliateCommission.findUniqueOrThrow({ where: { id: row.id } });
+    res.json({ commission: updated });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/refunds", async (_req, res, next) => {
+  try {
+    const refunds = await prisma.refund.findMany({ include: { order: { include: { buyer: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ refunds });
+  } catch (e) { next(e); }
+});
+
+adminRouter.post("/orders/:id/refund", async (req, res, next) => {
+  try {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!["PAID", "FULFILLED"].includes(order.status)) return res.status(409).json({ error: "Only paid orders can be refunded" });
+    const amountCents = Number(req.body?.amountCents ?? order.amountCents);
+    if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > order.amountCents) return res.status(400).json({ error: "Invalid refund amount" });
+    const refund = await prisma.$transaction(async tx => {
+      const alreadyRefunded = await tx.refund.aggregate({
+        where: { orderId: order.id, status: { in: ["APPROVED", "PROCESSING", "REFUNDED"] } },
+        _sum: { amountCents: true },
+      });
+      const refundedCents = alreadyRefunded._sum.amountCents || 0;
+      if (refundedCents + amountCents > order.amountCents) {
+        throw new Error("Refund amount exceeds the remaining refundable balance");
+      }
+      const row = await tx.refund.create({ data: { orderId: order.id, amountCents, reason: String(req.body?.reason || "Customer refund request"), status: "APPROVED", adminNote: req.body?.adminNote ? String(req.body.adminNote).slice(0,500) : null } });
+      if (refundedCents + amountCents === order.amountCents) {
+        await tx.order.update({ where: { id: order.id }, data: { status: "REFUNDED" } });
+      }
+      return row;
+    });
+    res.status(201).json({ refund });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/fraud-flags", async (_req, res, next) => {
+  try {
+    const flags = await prisma.fraudFlag.findMany({ include: { order: true, user: { select: { id: true, name: true, email: true, phone: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ flags });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/fraud-flags/:id", async (req, res, next) => {
+  try {
+    const status = String(req.body?.status || "");
+    if (!["OPEN", "REVIEWED", "CLEARED", "BLOCKED"].includes(status)) return res.status(400).json({ error: "Invalid fraud status" });
+    const flag = await prisma.fraudFlag.update({ where: { id: req.params.id }, data: { status: status as any, reviewedAt: new Date() } });
+    res.json({ flag });
+  } catch (e) { next(e); }
+});
+adminRouter.get("/notifications", async (_req, res, next) => {
+  try {
+    const notifications = await prisma.notification.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ notifications });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/audit-logs", async (_req, res, next) => {
+  try {
+    const logs = await prisma.auditLog.findMany({ include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ logs });
+  } catch (e) { next(e); }
+});
 adminRouter.get("/dashboard", async (_req, res, next) => {
   try {
     const legacyProfiles = await prisma.sellerProfile.findMany({
@@ -184,6 +304,52 @@ adminRouter.get("/orders", async (_req, res, next) => {
   }
 });
 
+
+adminRouter.patch("/products/:id/featured", async (req, res, next) => {
+  try {
+    const featured = Boolean(req.body?.featured);
+    const product = await prisma.product.update({ where: { id: req.params.id }, data: { featured } });
+    res.json({ product });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/sellers/:id/featured", async (req, res, next) => {
+  try {
+    const featured = Boolean(req.body?.featured);
+    const seller = await prisma.sellerProfile.update({ where: { id: req.params.id }, data: { featured } });
+    res.json({ seller });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/sellers/:id/verification", async (req, res, next) => {
+  try {
+    const verified = Boolean(req.body?.verified);
+    const seller = await prisma.sellerProfile.update({
+      where: { id: req.params.id },
+      data: { verifiedAt: verified ? new Date() : null, verificationNote: req.body?.note ? String(req.body.note).slice(0, 500) : null },
+    });
+    res.json({ seller });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/reviews", async (_req, res, next) => {
+  try {
+    const reviews = await prisma.review.findMany({
+      include: { user: { select: { id: true, name: true, email: true } }, product: { select: { id: true, code: true, name: true } } },
+      orderBy: { createdAt: "desc" }, take: 200,
+    });
+    res.json({ reviews });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/reviews/:id", async (req, res, next) => {
+  try {
+    const review = await prisma.review.update({ where: { id: req.params.id }, data: { approved: Boolean(req.body?.approved) } });
+    const aggregate = await prisma.review.aggregate({ where: { productId: review.productId, approved: true }, _avg: { rating: true } });
+    await prisma.product.update({ where: { id: review.productId }, data: { rating: aggregate._avg.rating ?? 0 } });
+    res.json({ review });
+  } catch (e) { next(e); }
+});
 adminRouter.post("/products/:id/status", async (req, res, next) => {
   try {
     const status = req.body?.status;
@@ -286,22 +452,20 @@ adminRouter.post("/payouts", async (req, res, next) => {
       });
     }
 
-    if (amountCents > seller.balanceCents) {
-      return res.status(400).json({
-        error: "The payout exceeds the author's available balance.",
-      });
-    }
-
     const phone = normalizePhone(seller.paymentNumber);
 
     const payout = await prisma.$transaction(async (tx) => {
-      await tx.sellerProfile.update({
-        where: { id: seller.id },
+      const reserved = await tx.sellerProfile.updateMany({
+        where: { id: seller.id, balanceCents: { gte: amountCents } },
         data: {
           balanceCents: { decrement: amountCents },
           pendingCents: { increment: amountCents },
         },
       });
+
+      if (reserved.count !== 1) {
+        throw new Error("The author's available balance has changed. Refresh and try again.");
+      }
 
       return tx.payout.create({
         data: {
@@ -346,20 +510,24 @@ adminRouter.post("/payouts/:id/mark-paid", async (req, res, next) => {
     const payout = await prisma.payout.findUnique({ where: { id: req.params.id } });
     if (!payout) return res.status(404).json({ error: "Payout not found" });
     if (payout.status === "PAID") return res.json({ payout });
+    if (payout.status === "FAILED") return res.status(409).json({ error: "Failed payouts must be re-created so the seller balance can be reserved again." });
 
     const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.payout.update({
-        where: { id: payout.id },
+      const claimed = await tx.payout.updateMany({
+        where: { id: payout.id, status: { in: ["PENDING", "PROCESSING"] } },
         data: {
           status: "PAID",
           processedAt: new Date(),
           reference: req.body?.reference || payout.reference,
         },
       });
-      await tx.sellerProfile.update({
-        where: { id: payout.sellerId },
+      if (claimed.count !== 1) throw new Error("Payout has already been settled");
+      const row = await tx.payout.findUniqueOrThrow({ where: { id: payout.id } });
+      const seller = await tx.sellerProfile.updateMany({
+        where: { id: payout.sellerId, pendingCents: { gte: payout.amountCents } },
         data: { pendingCents: { decrement: payout.amountCents } },
       });
+      if (seller.count !== 1) throw new Error("Seller pending balance is inconsistent");
       return row;
     });
 

@@ -11,6 +11,8 @@ import {
 import { stkPush } from "../services/mpesa.js";
 import { requireAuth } from "../middleware/auth.js";
 import { hashToken } from "../lib/auth.js";
+import { sendEmail, sendSms } from "../services/notifications.js";
+import { inspectOrderRisk } from "../services/fraud.js";
 
 export const orderRouter = Router();
 
@@ -27,6 +29,8 @@ orderRouter.post("/", async (req, res, next) => {
         phone: z.string(),
         email: z.string().email().optional(),
         address: z.string().max(500).optional(),
+        couponCode: z.string().trim().min(3).max(32).optional(),
+        referralCode: z.string().trim().min(3).max(64).optional(),
       })
       .parse(req.body);
 
@@ -54,12 +58,13 @@ orderRouter.post("/", async (req, res, next) => {
         email: b.email,
         address: b.address,
       },
-      req.user?.userId
+      req.user?.userId,
+      b.couponCode,
+      b.referralCode
     );
 
-    res.status(201).json({
-      order: o,
-    });
+    await inspectOrderRisk(o.id).catch(() => null);
+    res.status(201).json({ order: o });
   } catch (e) {
     next(e);
   }
@@ -137,28 +142,35 @@ orderRouter.post("/:id/pay", async (req, res, next) => {
 orderRouter.get("/:id", async (req, res, next) => {
   try {
     const o = await prisma.order.findUnique({
-      where: {
-        id: req.params.id,
-      },
-      include: {
-        payments: true,
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        publicId: true,
+        status: true,
         items: {
-          include: {
-            product: true,
+          select: {
+            product: {
+              select: { code: true, name: true },
+            },
           },
+        },
+        payments: {
+          select: {
+            status: true,
+            errorMessage: true,
+            resultCode: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 1,
         },
       },
     });
 
     if (!o) {
-      return res.status(404).json({
-        error: "Order not found",
-      });
+      return res.status(404).json({ error: "Order not found" });
     }
 
-    res.json({
-      order: o,
-    });
+    res.json({ order: o });
   } catch (e) {
     next(e);
   }
@@ -337,14 +349,10 @@ orderRouter.post(
           },
         });
 
-        await prisma.order.update({
-          where: {
-            id: payment.orderId,
-          },
-          data: {
-            status: "FAILED",
-          },
-        });
+        // Keep the order payable so the buyer can retry after a cancelled/failed STK push.\n        await prisma.order.update({ where: { id: payment.orderId }, data: { status: "PENDING" } });
+        const failedOrder = await prisma.order.findUnique({ where: { id: payment.orderId }, include: { items: { include: { product: true } } } });
+        if (failedOrder?.buyerEmail) await sendEmail(failedOrder.buyerId ?? undefined, failedOrder.buyerEmail, "UzaLink payment failed", `Payment for ${failedOrder.items[0]?.product.name || "your order"} was not completed. Order ${failedOrder.publicId}.`).catch(() => {});
+        if (failedOrder?.buyerPhone) await sendSms(failedOrder.buyerId ?? undefined, failedOrder.buyerPhone, `UzaLink: payment failed for order ${failedOrder.publicId}. Please try again.`).catch(() => {});
 
         return;
       }

@@ -89,11 +89,16 @@ productRouter.get("/", async (_req, res, next) => {
         seller: {
           select: {
             handle: true,
-            user: { select: { name: true } },
+            bio: true,
+            avatarUrl: true,
+            verifiedAt: true,
+            featured: true,
+            followersCount: true,
+            user: { select: { id: true, name: true } },
           },
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ featured: "desc" }, { createdAt: "desc" }],
     });
 
     res.json({ products });

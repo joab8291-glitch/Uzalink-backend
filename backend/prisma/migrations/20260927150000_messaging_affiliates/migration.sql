@@ -1,0 +1,17 @@
+CREATE TABLE IF NOT EXISTS "SellerMessage" ("id" TEXT NOT NULL,"senderId" TEXT NOT NULL,"recipientId" TEXT NOT NULL,"subject" TEXT,"body" TEXT NOT NULL,"readAt" TIMESTAMP(3),"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "SellerMessage_pkey" PRIMARY KEY ("id"));
+CREATE INDEX IF NOT EXISTS "SellerMessage_recipientId_readAt_createdAt_idx" ON "SellerMessage"("recipientId","readAt","createdAt");
+CREATE INDEX IF NOT EXISTS "SellerMessage_senderId_createdAt_idx" ON "SellerMessage"("senderId","createdAt");
+CREATE TABLE IF NOT EXISTS "AffiliateClick" ("id" TEXT NOT NULL,"code" TEXT NOT NULL,"referrerId" TEXT,"productId" TEXT,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "AffiliateClick_pkey" PRIMARY KEY ("id"));
+CREATE INDEX IF NOT EXISTS "AffiliateClick_code_createdAt_idx" ON "AffiliateClick"("code","createdAt");
+CREATE TABLE IF NOT EXISTS "AffiliateCommission" ("id" TEXT NOT NULL,"referralId" TEXT,"affiliateId" TEXT NOT NULL,"orderId" TEXT NOT NULL,"amountCents" INTEGER NOT NULL,"status" TEXT NOT NULL DEFAULT 'PENDING',"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"paidAt" TIMESTAMP(3),CONSTRAINT "AffiliateCommission_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX IF NOT EXISTS "AffiliateCommission_affiliateId_orderId_key" ON "AffiliateCommission"("affiliateId","orderId");
+CREATE INDEX IF NOT EXISTS "AffiliateCommission_affiliateId_status_idx" ON "AffiliateCommission"("affiliateId","status");
+ALTER TABLE "SellerProfile" ADD COLUMN IF NOT EXISTS "affiliateRate" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "SellerProfile" ADD COLUMN IF NOT EXISTS "affiliateEnabled" BOOLEAN NOT NULL DEFAULT false;
+DO $$ BEGIN ALTER TABLE "SellerMessage" ADD CONSTRAINT "SellerMessage_senderId_fkey" FOREIGN KEY ("senderId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "SellerMessage" ADD CONSTRAINT "SellerMessage_recipientId_fkey" FOREIGN KEY ("recipientId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "AffiliateClick" ADD CONSTRAINT "AffiliateClick_referrerId_fkey" FOREIGN KEY ("referrerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "AffiliateClick" ADD CONSTRAINT "AffiliateClick_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "AffiliateCommission" ADD CONSTRAINT "AffiliateCommission_affiliateId_fkey" FOREIGN KEY ("affiliateId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "AffiliateCommission" ADD CONSTRAINT "AffiliateCommission_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE "AffiliateCommission" ADD CONSTRAINT "AffiliateCommission_referralId_fkey" FOREIGN KEY ("referralId") REFERENCES "Referral"("id") ON DELETE SET NULL ON UPDATE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
