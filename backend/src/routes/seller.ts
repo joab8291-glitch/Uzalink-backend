@@ -104,7 +104,7 @@ async function ensureSellerProfile(
 /**
  * Seller dashboard
  *
- * FREE sellers can access their dashboard.
+ * Premium sellers can access their dashboard.
  * Premium is NOT required to sell.
  */
 sellerRouter.get(
