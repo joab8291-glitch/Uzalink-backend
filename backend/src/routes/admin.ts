@@ -59,6 +59,27 @@ async function ensureActiveSellerProfiles() {
 
 
 
+
+adminRouter.get("/affiliates", async (_req, res, next) => {
+  try {
+    const commissions = await prisma.affiliateCommission.findMany({
+      include: { affiliate: { select: { id: true, name: true, email: true } }, order: { select: { publicId: true, amountCents: true, status: true } } },
+      orderBy: { createdAt: "desc" }, take: 200,
+    });
+    res.json({ commissions });
+  } catch (e) { next(e); }
+});
+
+adminRouter.post("/affiliates/:id/pay", async (req, res, next) => {
+  try {
+    const row = await prisma.affiliateCommission.findUnique({ where: { id: req.params.id } });
+    if (!row) return res.status(404).json({ error: "Affiliate commission not found" });
+    if (row.status === "PAID") return res.status(409).json({ error: "Commission already paid" });
+    const updated = await prisma.affiliateCommission.update({ where: { id: row.id }, data: { status: "PAID", paidAt: new Date() } });
+    res.json({ commission: updated });
+  } catch (e) { next(e); }
+});
+
 adminRouter.get("/refunds", async (_req, res, next) => {
   try {
     const refunds = await prisma.refund.findMany({ include: { order: { include: { buyer: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
