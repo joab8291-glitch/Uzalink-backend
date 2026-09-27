@@ -60,6 +60,37 @@ async function ensureActiveSellerProfiles() {
 
 
 
+
+adminRouter.get("/fulfillment", async (_req, res, next) => {
+  try {
+    const [deliveries, bookings] = await Promise.all([
+      prisma.delivery.findMany({ include: { order: true, product: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+      prisma.booking.findMany({ include: { order: true, product: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+    ]);
+    res.json({ deliveries, bookings });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/deliveries/:id", async (req, res, next) => {
+  try {
+    const allowed = ["PENDING","PROCESSING","SHIPPED","DELIVERED","CANCELLED"];
+    const status = String(req.body?.status || "");
+    if (!allowed.includes(status)) return res.status(400).json({ error: "Invalid delivery status" });
+    const delivery = await prisma.delivery.update({ where: { id: req.params.id }, data: { status: status as any, trackingCode: req.body?.trackingCode ? String(req.body.trackingCode).slice(0,100) : undefined, notes: req.body?.notes ? String(req.body.notes).slice(0,1000) : undefined } });
+    res.json({ delivery });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/bookings/:id", async (req, res, next) => {
+  try {
+    const allowed = ["PENDING","CONFIRMED","COMPLETED","CANCELLED"];
+    const status = String(req.body?.status || "");
+    if (!allowed.includes(status)) return res.status(400).json({ error: "Invalid booking status" });
+    const booking = await prisma.booking.update({ where: { id: req.params.id }, data: { status: status as any, notes: req.body?.notes ? String(req.body.notes).slice(0,1000) : undefined, startsAt: req.body?.startsAt ? new Date(req.body.startsAt) : undefined, endsAt: req.body?.endsAt ? new Date(req.body.endsAt) : undefined } });
+    res.json({ booking });
+  } catch (e) { next(e); }
+});
+
 adminRouter.get("/affiliates", async (_req, res, next) => {
   try {
     const commissions = await prisma.affiliateCommission.findMany({
