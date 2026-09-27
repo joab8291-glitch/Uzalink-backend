@@ -23,6 +23,8 @@ engagementRouter.post("/products/:code/reviews", requireAuth, async (req, res, n
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be 1-5" });
     const product = await prisma.product.findUnique({ where: { code: req.params.code } });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    const purchase = await prisma.order.findFirst({ where: { buyerId: req.user!.id, status: { in: ["PAID", "FULFILLED"] }, items: { some: { productId: product.id } } } });
+    if (!purchase) return res.status(403).json({ error: "You can review a product only after purchasing it" });
     const review = await prisma.review.upsert({
       where: { userId_productId: { userId: req.user!.id, productId: product.id } },
       create: { userId: req.user!.id, productId: product.id, rating, title: req.body.title?.trim() || null, body: req.body.body?.trim() || null },
@@ -68,12 +70,11 @@ engagementRouter.post("/sellers/:sellerId/follow", requireAuth, async (req, res,
     if (req.user!.id === req.params.sellerId) return res.status(400).json({ error: "You cannot follow yourself" });
     const seller = await prisma.user.findFirst({ where: { id: req.params.sellerId, role: "SELLER" } });
     if (!seller) return res.status(404).json({ error: "Seller not found" });
-    await prisma.sellerFollow.upsert({
-      where: { followerId_sellerId: { followerId: req.user!.id, sellerId: seller.id } },
-      create: { followerId: req.user!.id, sellerId: seller.id },
-      update: {},
-    });
-    await prisma.sellerProfile.updateMany({ where: { userId: seller.id }, data: { followersCount: { increment: 1 } } });
+    const existing = await prisma.sellerFollow.findUnique({ where: { followerId_sellerId: { followerId: req.user!.id, sellerId: seller.id } } });
+    if (!existing) {
+      await prisma.sellerFollow.create({ data: { followerId: req.user!.id, sellerId: seller.id } });
+      await prisma.sellerProfile.updateMany({ where: { userId: seller.id }, data: { followersCount: { increment: 1 } } });
+    }
     res.status(201).json({ following: true });
   } catch (e) { next(e); }
 });
