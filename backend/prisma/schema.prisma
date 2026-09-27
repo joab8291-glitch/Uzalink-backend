@@ -90,6 +90,13 @@ model User {
   downloadGrants DownloadGrant[]
   notifications Notification[]
   auditLogs AuditLog[]
+  reviews Review[]
+  wishlist Wishlist[]
+  following SellerFollow[] @relation("Follower")
+  followers SellerFollow[] @relation("FollowedSeller")
+  couponRedemptions CouponRedemption[]
+  referralsSent Referral[] @relation("ReferralReferrer")
+  referralsReceived Referral[] @relation("ReferralReferred")
 }
 
 model SellerProfile {
@@ -102,6 +109,13 @@ model SellerProfile {
   pendingCents Int @default(0)
   lifetimeSalesCents Int @default(0)
   totalOrders Int @default(0)
+  bio String?
+  avatarUrl String?
+  verifiedAt DateTime?
+  verificationNote String?
+  featured Boolean @default(false)
+  followersCount Int @default(0)
+  coupons Coupon[]
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   payouts Payout[]
@@ -149,6 +163,10 @@ model Product {
   inventory Int?
   rating Float @default(0)
   salesCount Int @default(0)
+  featured Boolean @default(false)
+  reviews Review[]
+  wishlistItems Wishlist[]
+  couponRedemptions CouponRedemption[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   seller SellerProfile @relation(fields: [sellerId], references: [id], onDelete: Cascade)
@@ -158,6 +176,7 @@ model Product {
   deliveries Delivery[]
   @@index([sellerId, status])
   @@index([status, kind])
+  @@index([featured, status])
 }
 
 model Order {
@@ -182,6 +201,8 @@ model Order {
   downloadGrants DownloadGrant[]
   booking Booking?
   delivery Delivery?
+  reviews Review[]
+  couponRedemptions CouponRedemption[]
   @@index([buyerId, createdAt])
   @@index([status, createdAt])
 }
@@ -322,4 +343,92 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   @@index([entity, entityId])
+}
+
+
+model Review {
+  id String @id @default(cuid())
+  userId String
+  productId String
+  orderId String?
+  rating Int
+  title String?
+  body String?
+  approved Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  @@unique([userId, productId])
+  @@index([productId, approved])
+}
+
+model Wishlist {
+  id String @id @default(cuid())
+  userId String
+  productId String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  @@unique([userId, productId])
+  @@index([userId, createdAt])
+}
+
+model SellerFollow {
+  id String @id @default(cuid())
+  followerId String
+  sellerId String
+  createdAt DateTime @default(now())
+  follower User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  seller User @relation("FollowedSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  @@unique([followerId, sellerId])
+  @@index([sellerId, createdAt])
+}
+
+model Coupon {
+  id String @id @default(cuid())
+  code String @unique
+  sellerId String?
+  percentOff Int?
+  amountOffCents Int?
+  maxRedemptions Int?
+  redeemedCount Int @default(0)
+  active Boolean @default(true)
+  startsAt DateTime?
+  endsAt DateTime?
+  createdAt DateTime @default(now())
+  seller SellerProfile? @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  redemptions CouponRedemption[]
+  @@index([sellerId, active])
+}
+
+model CouponRedemption {
+  id String @id @default(cuid())
+  couponId String
+  userId String?
+  productId String?
+  orderId String?
+  amountSavedCents Int
+  createdAt DateTime @default(now())
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  @@index([couponId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Referral {
+  id String @id @default(cuid())
+  referrerId String
+  referredId String?
+  code String @unique
+  rewardCents Int @default(0)
+  status String @default("PENDING")
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  referrer User @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User? @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: SetNull)
+  @@index([referrerId, status])
 }
