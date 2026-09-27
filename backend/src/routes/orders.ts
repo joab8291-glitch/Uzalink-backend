@@ -11,6 +11,7 @@ import {
 import { stkPush } from "../services/mpesa.js";
 import { requireAuth } from "../middleware/auth.js";
 import { hashToken } from "../lib/auth.js";
+import { sendEmail, sendSms } from "../services/notifications.js";
 
 export const orderRouter = Router();
 
@@ -339,14 +340,10 @@ orderRouter.post(
           },
         });
 
-        await prisma.order.update({
-          where: {
-            id: payment.orderId,
-          },
-          data: {
-            status: "FAILED",
-          },
-        });
+        await prisma.order.update({ where: { id: payment.orderId }, data: { status: "FAILED" } });
+        const failedOrder = await prisma.order.findUnique({ where: { id: payment.orderId }, include: { items: { include: { product: true } } } });
+        if (failedOrder?.buyerEmail) await sendEmail(failedOrder.buyerId ?? undefined, failedOrder.buyerEmail, "UzaLink payment failed", `Payment for ${failedOrder.items[0]?.product.name || "your order"} was not completed. Order ${failedOrder.publicId}.`).catch(() => {});
+        if (failedOrder?.buyerPhone) await sendSms(failedOrder.buyerId ?? undefined, failedOrder.buyerPhone, `UzaLink: payment failed for order ${failedOrder.publicId}. Please try again.`).catch(() => {});
 
         return;
       }
