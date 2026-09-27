@@ -437,22 +437,20 @@ adminRouter.post("/payouts", async (req, res, next) => {
       });
     }
 
-    if (amountCents > seller.balanceCents) {
-      return res.status(400).json({
-        error: "The payout exceeds the author's available balance.",
-      });
-    }
-
     const phone = normalizePhone(seller.paymentNumber);
 
     const payout = await prisma.$transaction(async (tx) => {
-      await tx.sellerProfile.update({
-        where: { id: seller.id },
+      const reserved = await tx.sellerProfile.updateMany({
+        where: { id: seller.id, balanceCents: { gte: amountCents } },
         data: {
           balanceCents: { decrement: amountCents },
           pendingCents: { increment: amountCents },
         },
       });
+
+      if (reserved.count !== 1) {
+        throw new Error("The author's available balance has changed. Refresh and try again.");
+      }
 
       return tx.payout.create({
         data: {
