@@ -126,8 +126,18 @@ adminRouter.post("/orders/:id/refund", async (req, res, next) => {
     const amountCents = Number(req.body?.amountCents ?? order.amountCents);
     if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > order.amountCents) return res.status(400).json({ error: "Invalid refund amount" });
     const refund = await prisma.$transaction(async tx => {
+      const alreadyRefunded = await tx.refund.aggregate({
+        where: { orderId: order.id, status: { in: ["APPROVED", "PROCESSING", "REFUNDED"] } },
+        _sum: { amountCents: true },
+      });
+      const refundedCents = alreadyRefunded._sum.amountCents || 0;
+      if (refundedCents + amountCents > order.amountCents) {
+        throw new Error("Refund amount exceeds the remaining refundable balance");
+      }
       const row = await tx.refund.create({ data: { orderId: order.id, amountCents, reason: String(req.body?.reason || "Customer refund request"), status: "APPROVED", adminNote: req.body?.adminNote ? String(req.body.adminNote).slice(0,500) : null } });
-      if (amountCents === order.amountCents) await tx.order.update({ where: { id: order.id }, data: { status: "REFUNDED" } });
+      if (refundedCents + amountCents === order.amountCents) {
+        await tx.order.update({ where: { id: order.id }, data: { status: "REFUNDED" } });
+      }
       return row;
     });
     res.status(201).json({ refund });
