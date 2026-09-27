@@ -30,6 +30,7 @@ orderRouter.post("/", async (req, res, next) => {
         email: z.string().email().optional(),
         address: z.string().max(500).optional(),
         couponCode: z.string().trim().min(3).max(32).optional(),
+        referralCode: z.string().trim().min(3).max(64).optional(),
       })
       .parse(req.body);
 
@@ -58,7 +59,8 @@ orderRouter.post("/", async (req, res, next) => {
         address: b.address,
       },
       req.user?.userId,
-      b.couponCode
+      b.couponCode,
+      b.referralCode
     );
 
     await inspectOrderRisk(o.id).catch(() => null);
