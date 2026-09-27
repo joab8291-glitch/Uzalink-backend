@@ -15,7 +15,8 @@ export async function createOrder(
     address?: string;
   },
   buyerId?: string,
-  couponCode?: string
+  couponCode?: string,
+  referralCode?: string
 ) {
   const product = await prisma.product.findFirst({
     where: { id: productId, status: "ACTIVE" },
@@ -51,6 +52,12 @@ export async function createOrder(
     couponId = coupon.id;
   }
 
+  let referralId: string | undefined;
+  if (referralCode) {
+    const referral = await prisma.referral.findUnique({ where: { code: referralCode.trim().toUpperCase() } });
+    if (referral && referral.referrerId !== buyerId && referral.status === "PENDING") referralId = referral.id;
+  }
+
   const commission = Math.round((finalPrice * COMMISSION) / 100);
   const sellerNet = finalPrice - commission;
 
@@ -72,7 +79,7 @@ export async function createOrder(
       include: { items: true },
     });
 
-    if (couponId) {
+    if (referralId && buyerId) {\n      await tx.referral.update({ where: { id: referralId }, data: { referredId: buyerId, status: "COMPLETED", completedAt: new Date() } });\n    }\n\n    if (couponId) {
       await tx.couponRedemption.create({
         data: { couponId, userId: buyerId, productId: product.id, orderId: order.id, amountSavedCents },
       });
