@@ -96,11 +96,16 @@ export async function fulfillPaidOrder(
     if (!order) throw new Error("Order not found");
     if (order.status === "PAID" || order.status === "FULFILLED") return { order, downloadToken: undefined };
 
+    const claimed = await tx.order.updateMany({
+      where: { id: order.id, status: "PENDING" },
+      data: { status: "PAID", paidAt: new Date() },
+    });
+    if (claimed.count !== 1) return { order, downloadToken: undefined };
+
     const item = order.items[0];
     const seller = item.product.seller;
 
     await tx.payment.update({ where: { id: paymentId }, data: { status: "SUCCESS", receipt } });
-    await tx.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } });
 
     const metadata = (order.metadata || {}) as { referralCode?: string; couponId?: string };
     if (metadata.couponId) {
