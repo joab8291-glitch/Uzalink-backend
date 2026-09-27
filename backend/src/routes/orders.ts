@@ -342,7 +342,7 @@ orderRouter.post(
           },
         });
 
-        await prisma.order.update({ where: { id: payment.orderId }, data: { status: "FAILED" } });
+        // Keep the order payable so the buyer can retry after a cancelled/failed STK push.\n        await prisma.order.update({ where: { id: payment.orderId }, data: { status: "PENDING" } });
         const failedOrder = await prisma.order.findUnique({ where: { id: payment.orderId }, include: { items: { include: { product: true } } } });
         if (failedOrder?.buyerEmail) await sendEmail(failedOrder.buyerId ?? undefined, failedOrder.buyerEmail, "UzaLink payment failed", `Payment for ${failedOrder.items[0]?.product.name || "your order"} was not completed. Order ${failedOrder.publicId}.`).catch(() => {});
         if (failedOrder?.buyerPhone) await sendSms(failedOrder.buyerId ?? undefined, failedOrder.buyerPhone, `UzaLink: payment failed for order ${failedOrder.publicId}. Please try again.`).catch(() => {});
