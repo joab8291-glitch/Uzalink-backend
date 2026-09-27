@@ -69,7 +69,7 @@ export async function createOrder(
         buyerName: buyer.name,
         buyerPhone: buyer.phone,
         buyerEmail: buyer.email,
-        metadata: buyer.address || referralId ? { ...(buyer.address ? { address: buyer.address } : {}), ...(referralId ? { referralCode: referralCode!.trim().toUpperCase() } : {}) } : undefined,
+        metadata: buyer.address || referralId || couponId ? { ...(buyer.address ? { address: buyer.address } : {}), ...(referralId ? { referralCode: referralCode!.trim().toUpperCase() } : {}), ...(couponId ? { couponCode: couponCode!.trim().toUpperCase(), couponId } : {}) } : undefined,
         amountCents: finalPrice,
         commissionCents: commission,
         sellerNetCents: sellerNet,
@@ -78,16 +78,6 @@ export async function createOrder(
       },
       include: { items: true },
     });
-
-    if (couponId) {
-      await tx.couponRedemption.create({
-        data: { couponId, userId: buyerId, productId: product.id, orderId: order.id, amountSavedCents },
-      });
-      await tx.coupon.update({
-        where: { id: couponId },
-        data: { redeemedCount: { increment: 1 } },
-      });
-    }
 
     return order;
   });
@@ -111,6 +101,31 @@ export async function fulfillPaidOrder(
 
     await tx.payment.update({ where: { id: paymentId }, data: { status: "SUCCESS", receipt } });
     await tx.order.update({ where: { id: order.id }, data: { status: "PAID", paidAt: new Date() } });
+
+    const metadata = (order.metadata || {}) as { referralCode?: string; couponId?: string };
+    if (metadata.couponId) {
+      const existingRedemption = await tx.couponRedemption.findFirst({
+        where: { couponId: metadata.couponId, orderId: order.id },
+      });
+      if (!existingRedemption) {
+        const coupon = await tx.coupon.findUnique({ where: { id: metadata.couponId } });
+        if (coupon && coupon.active && (coupon.maxRedemptions === null || coupon.redeemedCount < coupon.maxRedemptions)) {
+          await tx.couponRedemption.create({
+            data: {
+              couponId: coupon.id,
+              userId: order.buyerId,
+              productId: item.product.id,
+              orderId: order.id,
+              amountSavedCents: Math.max(0, item.product.priceCents - item.unitPriceCents),
+            },
+          });
+          await tx.coupon.update({
+            where: { id: coupon.id },
+            data: { redeemedCount: { increment: 1 } },
+          });
+        }
+      }
+    }
 
     if (order.buyerId) {
       const metadata = (order.metadata || {}) as { referralCode?: string };
