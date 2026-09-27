@@ -58,7 +58,46 @@ async function ensureActiveSellerProfiles() {
 }
 
 
-adminRouter.get("/notifications", async (_req, res, next) => {
+
+adminRouter.get("/refunds", async (_req, res, next) => {
+  try {
+    const refunds = await prisma.refund.findMany({ include: { order: { include: { buyer: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ refunds });
+  } catch (e) { next(e); }
+});
+
+adminRouter.post("/orders/:id/refund", async (req, res, next) => {
+  try {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!["PAID", "FULFILLED"].includes(order.status)) return res.status(409).json({ error: "Only paid orders can be refunded" });
+    const amountCents = Number(req.body?.amountCents ?? order.amountCents);
+    if (!Number.isInteger(amountCents) || amountCents <= 0 || amountCents > order.amountCents) return res.status(400).json({ error: "Invalid refund amount" });
+    const refund = await prisma.$transaction(async tx => {
+      const row = await tx.refund.create({ data: { orderId: order.id, amountCents, reason: String(req.body?.reason || "Customer refund request"), status: "APPROVED", adminNote: req.body?.adminNote ? String(req.body.adminNote).slice(0,500) : null } });
+      if (amountCents === order.amountCents) await tx.order.update({ where: { id: order.id }, data: { status: "REFUNDED" } });
+      return row;
+    });
+    res.status(201).json({ refund });
+  } catch (e) { next(e); }
+});
+
+adminRouter.get("/fraud-flags", async (_req, res, next) => {
+  try {
+    const flags = await prisma.fraudFlag.findMany({ include: { order: true, user: { select: { id: true, name: true, email: true, phone: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    res.json({ flags });
+  } catch (e) { next(e); }
+});
+
+adminRouter.patch("/fraud-flags/:id", async (req, res, next) => {
+  try {
+    const status = String(req.body?.status || "");
+    if (!["OPEN", "REVIEWED", "CLEARED", "BLOCKED"].includes(status)) return res.status(400).json({ error: "Invalid fraud status" });
+    const flag = await prisma.fraudFlag.update({ where: { id: req.params.id }, data: { status: status as any, reviewedAt: new Date() } });
+    res.json({ flag });
+  } catch (e) { next(e); }
+});
+\nadminRouter.get("/notifications", async (_req, res, next) => {
   try {
     const notifications = await prisma.notification.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
     res.json({ notifications });
