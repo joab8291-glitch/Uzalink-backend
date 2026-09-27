@@ -116,7 +116,7 @@ model User {
   referralsSent Referral[] @relation("ReferralReferrer")
   referralsReceived Referral[] @relation("ReferralReferred")
   affiliateClicks AffiliateClick[]
-  affiliateCommissions AffiliateCommission[]
+  affiliateCommissions AffiliateCommission[] @relation("AffiliateCommissions")
 }
 
 model SellerProfile {
@@ -228,6 +228,7 @@ model Order {
   couponRedemptions CouponRedemption[]
   refunds Refund[]
   fraudFlags FraudFlag[]
+  affiliateCommissions AffiliateCommission[]
   @@index([buyerId, createdAt])
   @@index([status, createdAt])
 }
@@ -455,6 +456,7 @@ model Referral {
   completedAt DateTime?
   referrer User @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
   referred User? @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: SetNull)
+  affiliateCommissions AffiliateCommission[]
   @@index([referrerId, status])
 }
 
@@ -524,7 +526,7 @@ model AffiliateCommission {
   status String @default("PENDING")
   createdAt DateTime @default(now())
   paidAt DateTime?
-  affiliate User @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  affiliate User @relation("AffiliateCommissions", fields: [affiliateId], references: [id], onDelete: Cascade)
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
   referral Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
   @@unique([affiliateId, orderId])
