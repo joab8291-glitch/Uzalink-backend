@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS "Coupon" (
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "Coupon_pkey" PRIMARY KEY ("id")
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "Coupon_code_key" ON "Coupon"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "Coupon_code_key" ON "Coupon"(UPPER("code"));
 CREATE INDEX IF NOT EXISTS "Coupon_sellerId_active_idx" ON "Coupon"("sellerId","active");
 
 CREATE TABLE IF NOT EXISTS "CouponRedemption" (
