@@ -7,7 +7,7 @@ export const engagementRouter = Router();
 
 engagementRouter.get("/products/:code/reviews", async (req, res, next) => {
   try {
-    const product = await prisma.product.findUnique({ where: { code: req.params.code } });
+    const product = await prisma.product.findUnique({ where: { code: String(req.params.code) } });
     if (!product) return res.status(404).json({ error: "Product not found" });
     const reviews = await prisma.review.findMany({
       where: { productId: product.id, approved: true },
@@ -22,13 +22,13 @@ engagementRouter.post("/products/:code/reviews", requireAuth, async (req, res, n
   try {
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be 1-5" });
-    const product = await prisma.product.findUnique({ where: { code: req.params.code } });
+    const product = await prisma.product.findUnique({ where: { code: String(req.params.code) } });
     if (!product) return res.status(404).json({ error: "Product not found" });
-    const purchase = await prisma.order.findFirst({ where: { buyerId: req.user!.id, status: { in: ["PAID", "FULFILLED"] }, items: { some: { productId: product.id } } } });
+    const purchase = await prisma.order.findFirst({ where: { buyerId: req.user!.userId, status: { in: ["PAID", "FULFILLED"] }, items: { some: { productId: product.id } } } });
     if (!purchase) return res.status(403).json({ error: "You can review a product only after purchasing it" });
     const review = await prisma.review.upsert({
-      where: { userId_productId: { userId: req.user!.id, productId: product.id } },
-      create: { userId: req.user!.id, productId: product.id, orderId: purchase.id, rating, title: req.body.title?.trim() || null, body: req.body.body?.trim() || null },
+      where: { userId_productId: { userId: req.user!.userId, productId: product.id } },
+      create: { userId: req.user!.userId, productId: product.id, orderId: purchase.id, rating, title: req.body.title?.trim() || null, body: req.body.body?.trim() || null },
       update: { rating, title: req.body.title?.trim() || null, body: req.body.body?.trim() || null, orderId: purchase.id },
     });
     const aggregate = await prisma.review.aggregate({ where: { productId: product.id, approved: true }, _avg: { rating: true } });
@@ -39,18 +39,18 @@ engagementRouter.post("/products/:code/reviews", requireAuth, async (req, res, n
 
 engagementRouter.get("/wishlist", requireAuth, async (req, res, next) => {
   try {
-    const items = await prisma.wishlist.findMany({ where: { userId: req.user!.id }, orderBy: { createdAt: "desc" }, include: { product: true } });
+    const items = await prisma.wishlist.findMany({ where: { userId: req.user!.userId }, orderBy: { createdAt: "desc" }, include: { product: true } });
     res.json({ items });
   } catch (e) { next(e); }
 });
 
 engagementRouter.post("/wishlist/:code", requireAuth, async (req, res, next) => {
   try {
-    const product = await prisma.product.findUnique({ where: { code: req.params.code, status: "ACTIVE" } });
+    const product = await prisma.product.findUnique({ where: { code: String(req.params.code), status: "ACTIVE" } });
     if (!product) return res.status(404).json({ error: "Product not found" });
     const item = await prisma.wishlist.upsert({
-      where: { userId_productId: { userId: req.user!.id, productId: product.id } },
-      create: { userId: req.user!.id, productId: product.id },
+      where: { userId_productId: { userId: req.user!.userId, productId: product.id } },
+      create: { userId: req.user!.userId, productId: product.id },
       update: {},
     });
     res.status(201).json({ item });
@@ -59,20 +59,20 @@ engagementRouter.post("/wishlist/:code", requireAuth, async (req, res, next) => 
 
 engagementRouter.delete("/wishlist/:code", requireAuth, async (req, res, next) => {
   try {
-    const product = await prisma.product.findUnique({ where: { code: req.params.code } });
+    const product = await prisma.product.findUnique({ where: { code: String(req.params.code) } });
     if (!product) return res.status(404).json({ error: "Product not found" });
-    await prisma.wishlist.deleteMany({ where: { userId: req.user!.id, productId: product.id } });
+    await prisma.wishlist.deleteMany({ where: { userId: req.user!.userId, productId: product.id } });
     res.status(204).send();
   } catch (e) { next(e); }
 });
 
 engagementRouter.post("/sellers/:sellerId/follow", requireAuth, async (req, res, next) => {
   try {
-    if (req.user!.id === req.params.sellerId) return res.status(400).json({ error: "You cannot follow yourself" });
-    const seller = await prisma.user.findFirst({ where: { id: req.params.sellerId, role: "SELLER" } });
+    if (req.user!.userId === String(req.params.sellerId)) return res.status(400).json({ error: "You cannot follow yourself" });
+    const seller = await prisma.user.findFirst({ where: { id: String(req.params.sellerId), role: "SELLER" } });
     if (!seller) return res.status(404).json({ error: "Seller not found" });
     try {
-      await prisma.sellerFollow.create({ data: { followerId: req.user!.id, sellerId: seller.id } });
+      await prisma.sellerFollow.create({ data: { followerId: req.user!.userId, sellerId: seller.id } });
       await prisma.sellerProfile.updateMany({ where: { userId: seller.id }, data: { followersCount: { increment: 1 } } });
     } catch (error: any) {
       if (error?.code !== "P2002") throw error;
@@ -83,8 +83,8 @@ engagementRouter.post("/sellers/:sellerId/follow", requireAuth, async (req, res,
 
 engagementRouter.delete("/sellers/:sellerId/follow", requireAuth, async (req, res, next) => {
   try {
-    const deleted = await prisma.sellerFollow.deleteMany({ where: { followerId: req.user!.id, sellerId: req.params.sellerId } });
-    if (deleted.count) await prisma.sellerProfile.updateMany({ where: { userId: req.params.sellerId }, data: { followersCount: { decrement: 1 } } });
+    const deleted = await prisma.sellerFollow.deleteMany({ where: { followerId: req.user!.userId, sellerId: String(req.params.sellerId) } });
+    if (deleted.count) await prisma.sellerProfile.updateMany({ where: { userId: String(req.params.sellerId) }, data: { followersCount: { decrement: 1 } } });
     res.status(204).send();
   } catch (e) { next(e); }
 });
@@ -92,7 +92,7 @@ engagementRouter.delete("/sellers/:sellerId/follow", requireAuth, async (req, re
 engagementRouter.get("/sellers/:sellerId", async (req, res, next) => {
   try {
     const seller = await prisma.user.findFirst({
-      where: { id: req.params.sellerId, role: "SELLER" },
+      where: { id: String(req.params.sellerId), role: "SELLER" },
       select: { id: true, name: true, seller: { select: { handle: true, bio: true, avatarUrl: true, verifiedAt: true, featured: true, followersCount: true } } },
     });
     if (!seller) return res.status(404).json({ error: "Seller not found" });
@@ -102,7 +102,7 @@ engagementRouter.get("/sellers/:sellerId", async (req, res, next) => {
 
 engagementRouter.get("/coupons/:code", async (req, res, next) => {
   try {
-    const coupon = await prisma.coupon.findUnique({ where: { code: req.params.code.trim().toUpperCase() }, select: { code: true, sellerId: true, percentOff: true, amountOffCents: true, maxRedemptions: true, redeemedCount: true, active: true, startsAt: true, endsAt: true } });
+    const coupon = await prisma.coupon.findUnique({ where: { code: String(req.params.code).trim().toUpperCase() }, select: { code: true, sellerId: true, percentOff: true, amountOffCents: true, maxRedemptions: true, redeemedCount: true, active: true, startsAt: true, endsAt: true } });
     const now = new Date();
     if (!coupon || !coupon.active || (coupon.startsAt && coupon.startsAt > now) || (coupon.endsAt && coupon.endsAt < now) || (coupon.maxRedemptions !== null && coupon.redeemedCount >= coupon.maxRedemptions)) {
       return res.status(404).json({ error: "Coupon is invalid or expired" });
@@ -125,7 +125,7 @@ engagementRouter.post("/coupons", requireAuth, requireRole("SELLER", "ADMIN"), a
 
     let sellerId: string | null = null;
     if (req.user!.role === "SELLER") {
-      const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.id } });
+      const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.userId } });
       if (!seller) return res.status(400).json({ error: "Seller profile not found" });
       sellerId = seller.id;
     } else if (req.body.sellerId) {
@@ -143,10 +143,10 @@ engagementRouter.post("/coupons", requireAuth, requireRole("SELLER", "ADMIN"), a
 
 engagementRouter.patch("/coupons/:code", requireAuth, requireRole("SELLER", "ADMIN"), async (req, res, next) => {
   try {
-    const coupon = await prisma.coupon.findUnique({ where: { code: req.params.code.trim().toUpperCase() } });
+    const coupon = await prisma.coupon.findUnique({ where: { code: String(req.params.code).trim().toUpperCase() } });
     if (!coupon) return res.status(404).json({ error: "Coupon not found" });
     if (req.user!.role === "SELLER") {
-      const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.id } });
+      const seller = await prisma.sellerProfile.findUnique({ where: { userId: req.user!.userId } });
       if (!seller || coupon.sellerId !== seller.id) return res.status(403).json({ error: "You can only manage your own coupons" });
     }
     const active = req.body.active === undefined ? undefined : Boolean(req.body.active);
@@ -157,10 +157,10 @@ engagementRouter.patch("/coupons/:code", requireAuth, requireRole("SELLER", "ADM
 
 engagementRouter.post("/referrals", requireAuth, async (req, res, next) => {
   try {
-    const existing = await prisma.referral.findFirst({ where: { referrerId: req.user!.id, status: "PENDING" } });
+    const existing = await prisma.referral.findFirst({ where: { referrerId: req.user!.userId, status: "PENDING" } });
     if (existing) return res.json({ referral: existing });
     const referral = await prisma.referral.create({
-      data: { referrerId: req.user!.id, code: `REF-${crypto.randomBytes(5).toString("hex").toUpperCase()}` },
+      data: { referrerId: req.user!.userId, code: `REF-${crypto.randomBytes(5).toString("hex").toUpperCase()}` },
     });
     res.status(201).json({ referral });
   } catch (e) { next(e); }
@@ -168,14 +168,14 @@ engagementRouter.post("/referrals", requireAuth, async (req, res, next) => {
 
 engagementRouter.get("/referrals/me", requireAuth, async (req, res, next) => {
   try {
-    const referrals = await prisma.referral.findMany({ where: { referrerId: req.user!.id }, orderBy: { createdAt: "desc" } });
+    const referrals = await prisma.referral.findMany({ where: { referrerId: req.user!.userId }, orderBy: { createdAt: "desc" } });
     res.json({ referrals });
   } catch (e) { next(e); }
 });
 
 engagementRouter.get("/referrals/:code", async (req, res, next) => {
   try {
-    const referral = await prisma.referral.findUnique({ where: { code: req.params.code } });
+    const referral = await prisma.referral.findUnique({ where: { code: String(req.params.code) } });
     if (!referral) return res.status(404).json({ error: "Referral code not found" });
     res.json({ referral: { code: referral.code, status: referral.status } });
   } catch (e) { next(e); }
