@@ -107,6 +107,284 @@ function isConfiguredAdmin(user: {
   return emailMatches || phoneMatches;
 }
 
+/*
+ * ============================================================
+ * ADMIN TEST LOGIN
+ * ============================================================
+ *
+ * This is a controlled testing login for the UzaLink Admin
+ * Dashboard.
+ *
+ * Render environment variables:
+ *
+ * ADMIN_TEST_ENABLED=true
+ * ADMIN_TEST_PHONE=0733304491
+ * ADMIN_TEST_CODE=1234
+ *
+ * The credentials are kept on the backend and are NOT exposed
+ * in the frontend.
+ */
+
+function isAdminTestEnabled() {
+  return env.ADMIN_TEST_ENABLED === true;
+}
+
+function isAdminTestPhone(phone: string) {
+  if (!env.ADMIN_TEST_PHONE) {
+    return false;
+  }
+
+  return (
+    normalizeIdentity(phone) ===
+    normalizeIdentity(env.ADMIN_TEST_PHONE)
+  );
+}
+
+authRouter.post(
+  "/admin/test/request",
+  async (req, res, next) => {
+    try {
+      if (!isAdminTestEnabled()) {
+        return res.status(404).json({
+          error: "Admin test login is disabled.",
+        });
+      }
+
+      const phone = z
+        .string()
+        .trim()
+        .min(7)
+        .parse(req.body?.phone);
+
+      const normalizedPhone =
+        normalizeIdentity(phone);
+
+      if (!isAdminTestPhone(normalizedPhone)) {
+        return res.status(401).json({
+          error: "Invalid admin test credentials.",
+        });
+      }
+
+      if (!env.ADMIN_TEST_CODE) {
+        return res.status(503).json({
+          error:
+            "Admin test login is not configured on the server.",
+        });
+      }
+
+      let user =
+        await prisma.user.findUnique({
+          where: {
+            phone: normalizedPhone,
+          },
+        });
+
+      /*
+       * Create the admin test account automatically if it
+       * does not already exist.
+       */
+      if (!user) {
+        user = await prisma.user.create({
+          data: {
+            phone: normalizedPhone,
+            name:
+              env.ADMIN_NAME ||
+              "UzaLink Admin",
+            role: "ADMIN",
+          },
+        });
+      } else if (user.role !== "ADMIN") {
+        /*
+         * The configured test account is promoted to ADMIN
+         * only through this controlled test flow.
+         */
+        user = await prisma.user.update({
+          where: {
+            id: user.id,
+          },
+          data: {
+            role: "ADMIN",
+          },
+        });
+      }
+
+      /*
+       * Generate a deterministic hashed token from the
+       * configured test credentials.
+       *
+       * The actual phone and code are never returned to
+       * the frontend by the backend.
+       */
+      const adminTokenHash = hashToken(
+        `admin-test:${normalizedPhone}:${env.ADMIN_TEST_CODE}`
+      );
+
+      /*
+       * tokenHash is unique in the database.
+       * Remove an existing test token before creating a
+       * replacement.
+       */
+      await prisma.magicLink.deleteMany({
+        where: {
+          tokenHash: adminTokenHash,
+        },
+      });
+
+      await prisma.magicLink.create({
+        data: {
+          userId: user.id,
+          tokenHash: adminTokenHash,
+          expiresAt: new Date(
+            Date.now() + 10 * 60 * 1000
+          ),
+        },
+      });
+
+      return res.json({
+        ok: true,
+        message:
+          "Admin verification code ready.",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+authRouter.post(
+  "/admin/test/verify",
+  async (req, res, next) => {
+    try {
+      if (!isAdminTestEnabled()) {
+        return res.status(404).json({
+          error: "Admin test login is disabled.",
+        });
+      }
+
+      const phone = z
+        .string()
+        .trim()
+        .min(7)
+        .parse(req.body?.phone);
+
+      const code = z
+        .string()
+        .trim()
+        .min(4)
+        .max(8)
+        .parse(req.body?.code);
+
+      const normalizedPhone =
+        normalizeIdentity(phone);
+
+      /*
+       * Validate the configured test credentials
+       * entirely on the backend.
+       */
+      if (
+        !isAdminTestPhone(normalizedPhone) ||
+        !env.ADMIN_TEST_CODE ||
+        code !== env.ADMIN_TEST_CODE
+      ) {
+        return res.status(401).json({
+          error:
+            "Invalid admin phone number or verification code.",
+        });
+      }
+
+      const expectedToken =
+        hashToken(
+          `admin-test:${normalizedPhone}:${code}`
+        );
+
+      const link =
+        await prisma.magicLink.findUnique({
+          where: {
+            tokenHash: expectedToken,
+          },
+          include: {
+            user: true,
+          },
+        });
+
+      if (!link || link.usedAt) {
+        return res.status(400).json({
+          error:
+            "Invalid or already used admin verification code.",
+        });
+      }
+
+      if (
+        link.expiresAt.getTime() <
+        Date.now()
+      ) {
+        return res.status(400).json({
+          error:
+            "Admin verification code has expired.",
+        });
+      }
+
+      /*
+       * Make absolutely sure the authenticated account
+       * has ADMIN role.
+       */
+      const user =
+        await prisma.user.update({
+          where: {
+            id: link.user.id,
+          },
+          data: {
+            role: "ADMIN",
+            name:
+              link.user.name ||
+              env.ADMIN_NAME ||
+              "UzaLink Admin",
+          },
+        });
+
+      /*
+       * Consume the test verification token.
+       */
+      await prisma.magicLink.update({
+        where: {
+          id: link.id,
+        },
+        data: {
+          usedAt: new Date(),
+        },
+      });
+
+      /*
+       * Create the normal UzaLink session with ADMIN role.
+       */
+      setSessionCookie(res, {
+        userId: user.id,
+        role: "ADMIN",
+      });
+
+      return res.json({
+        ok: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          phone: user.phone,
+          name: user.name,
+          role: "ADMIN",
+        },
+        admin: true,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/*
+ * ============================================================
+ * NORMAL MAGIC LINK LOGIN
+ * ============================================================
+ */
+
 authRouter.post("/magic-link", async (req, res, next) => {
   try {
     const body = identity.parse(req.body);
@@ -254,7 +532,9 @@ authRouter.post("/magic-link", async (req, res, next) => {
 });
 
 /*
+ * ============================================================
  * PREMIUM MAGIC LOGIN
+ * ============================================================
  *
  * TEMPORARY TESTING MODE:
  *
@@ -710,6 +990,12 @@ authRouter.post(
   }
 );
 
+/*
+ * ============================================================
+ * VERIFY NORMAL MAGIC LINK
+ * ============================================================
+ */
+
 authRouter.post(
   "/verify-magic-link",
   async (req, res, next) => {
@@ -791,6 +1077,12 @@ authRouter.post(
   }
 );
 
+/*
+ * ============================================================
+ * CURRENT AUTHENTICATED USER
+ * ============================================================
+ */
+
 authRouter.get(
   "/me",
   requireAuth,
@@ -847,6 +1139,12 @@ authRouter.get(
     }
   }
 );
+
+/*
+ * ============================================================
+ * LOGOUT
+ * ============================================================
+ */
 
 authRouter.post(
   "/logout",
