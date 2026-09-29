@@ -14,6 +14,13 @@ import { hashToken } from "../lib/auth.js";
 import { sendEmail, sendSms } from "../services/notifications.js";
 import { inspectOrderRisk } from "../services/fraud.js";
 
+function normalizePhone(input: string): string {
+  const digits = input.replace(/\D/g, "");
+  if (digits.startsWith("254")) return "0" + digits.slice(3);
+  if (digits.startsWith("7") || digits.startsWith("1")) return "0" + digits;
+  return digits;
+}
+
 export const orderRouter = Router();
 
 /**
