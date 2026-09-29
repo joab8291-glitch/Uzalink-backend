@@ -8,13 +8,18 @@ import { requireAuth } from "../middleware/auth.js";
 
 export const authRouter = Router();
 
-const identity = z.object({
-  email: z.string().trim().email().optional(),
-  phone: z.string().trim().min(7).optional(),
-  name: z.string().trim().min(2).optional(),
-}).refine((value) => Boolean(value.email) || Boolean(value.phone), {
-  message: "Email or phone is required",
-});
+const identity = z
+  .object({
+    email: z.string().trim().email().optional(),
+    phone: z.string().trim().min(7).optional(),
+    name: z.string().trim().min(2).optional(),
+  })
+  .refine(
+    (value) => Boolean(value.email) || Boolean(value.phone),
+    {
+      message: "Email or phone is required",
+    }
+  );
 
 function normalizeIdentity(value: string) {
   const trimmed = value.trim();
@@ -105,6 +110,7 @@ function isConfiguredAdmin(user: {
 authRouter.post("/magic-link", async (req, res, next) => {
   try {
     const body = identity.parse(req.body);
+
     const intent =
       req.body?.intent === "seller" ? "seller" : "buyer";
 
@@ -167,8 +173,8 @@ authRouter.post("/magic-link", async (req, res, next) => {
     }
 
     /*
-     * Admin access is controlled only by server-side environment
-     * variables. Users cannot choose ADMIN from the frontend.
+     * Admin access is controlled only by server-side
+     * environment variables.
      */
     if (
       isConfiguredAdmin(user) &&
@@ -304,24 +310,24 @@ authRouter.post(
        * a seller account using the identity supplied by the user.
        */
       if (!user && openGate) {
-        const accountData = identityValue.includes("@")
-          ? {
-              email: identityValue,
-              phone: undefined,
-              name: "Premium Seller",
-              role: "SELLER" as const,
-            }
-          : {
-              email: undefined,
-              phone: identityValue,
-              name: "Premium Seller",
-              role: "SELLER" as const,
-            };
-
         try {
-          user = await prisma.user.create({
-            data: accountData,
-          });
+          if (identityValue.includes("@")) {
+            user = await prisma.user.create({
+              data: {
+                email: identityValue,
+                name: "Premium Seller",
+                role: "SELLER",
+              },
+            });
+          } else {
+            user = await prisma.user.create({
+              data: {
+                phone: identityValue,
+                name: "Premium Seller",
+                role: "SELLER",
+              },
+            });
+          }
         } catch (error: any) {
           /*
            * Handle a race where another request created
@@ -364,8 +370,8 @@ authRouter.post(
       );
 
       /*
-       * Temporary open gate automatically grants a
-       * temporary Premium subscription for testing.
+       * Temporary open gate automatically grants
+       * a temporary Premium subscription.
        */
       if (openGate) {
         const active =
@@ -423,7 +429,8 @@ authRouter.post(
       }
 
       /*
-       * Testing mode always uses the fixed configured code.
+       * Testing mode always uses the fixed code.
+       *
        * Production mode generates a random six-digit code.
        */
       const code = openGate
@@ -436,24 +443,38 @@ authRouter.post(
           );
 
       /*
-       * Remove previous unused Premium codes.
+       * IMPORTANT FIX:
+       *
+       * The testing code is fixed at 1234.
+       * Therefore:
+       *
+       * premium:<identity>:1234
+       *
+       * produces the same hash every time the user requests
+       * another code.
+       *
+       * tokenHash is UNIQUE in the database.
+       *
+       * Delete the previous Premium verification token with
+       * this exact hash before creating the replacement.
        */
+      const premiumTokenHash = hashToken(
+        `premium:${identityValue}:${code}`
+      );
+
       await prisma.magicLink.deleteMany({
         where: {
-          userId: user.id,
-          usedAt: null,
+          tokenHash: premiumTokenHash,
         },
       });
 
       /*
-       * Store a hashed verification value.
+       * Store the hashed verification value.
        */
       await prisma.magicLink.create({
         data: {
           userId: user.id,
-          tokenHash: hashToken(
-            `premium:${identityValue}:${code}`
-          ),
+          tokenHash: premiumTokenHash,
           expiresAt: new Date(
             Date.now() + 10 * 60 * 1000
           ),
@@ -461,10 +482,10 @@ authRouter.post(
       });
 
       /*
-       * Send the SMS through the configured provider when available.
+       * Send SMS through the configured provider when
+       * a phone number and SMS webhook are available.
        *
-       * In testing mode, the code remains fixed at the configured
-       * PREMIUM_TEST_CODE so the flow can be tested consistently.
+       * In testing mode, the code remains fixed at 1234.
        */
       if (
         env.SMS_WEBHOOK_URL &&
@@ -478,6 +499,7 @@ authRouter.post(
               headers: {
                 "Content-Type":
                   "application/json",
+
                 ...(env.SMS_WEBHOOK_TOKEN
                   ? {
                       Authorization:
@@ -576,8 +598,8 @@ authRouter.post(
       }
 
       /*
-       * In open-gate testing mode, make sure the
-       * account has an active temporary Premium subscription.
+       * In open-gate testing mode, make sure the account
+       * has an active temporary Premium subscription.
        */
       let activeSubscription =
         await prisma.subscription.findFirst({
