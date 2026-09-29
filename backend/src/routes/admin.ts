@@ -844,7 +844,7 @@ adminRouter.delete("/products/:id", async (req, res, next) => {
        *
        * req.user is supplied by your existing auth middleware.
        */
-      const adminUserId = (req as any).user?.id ?? null;
+      const adminUserId = (req as any).user?.userId ?? null;
 
       await tx.auditLog.create({
         data: {
