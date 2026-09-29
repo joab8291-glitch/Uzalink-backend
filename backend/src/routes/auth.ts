@@ -16,6 +16,52 @@ const identity = z.object({
   message: "Email or phone is required",
 });
 
+function normalizeIdentity(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.includes("@")) return trimmed.toLowerCase();
+  return trimmed.replace(/\D/g, "");
+}
+
+async function ensurePremiumSeller(userId: string, name?: string | null) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new Error("User not found");
+
+  if (user.role !== "SELLER") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { role: "SELLER" },
+    });
+  }
+
+  let seller = await prisma.sellerProfile.findUnique({
+    where: { userId: user.id },
+  });
+
+  if (!seller) {
+    const base =
+      (name || user.name || "seller")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+        .slice(0, 18) || "seller";
+
+    let handle = `${base}_${user.id.slice(-6).toLowerCase()}`;
+    let counter = 1;
+
+    while (await prisma.sellerProfile.findUnique({ where: { handle } })) {
+      handle = `${base}_${user.id.slice(-6).toLowerCase()}_${counter++}`;
+    }
+
+    seller = await prisma.sellerProfile.create({
+      data: {
+        userId: user.id,
+        handle,
+      },
+    });
+  }
+
+  return seller;
+}
+
 function isConfiguredAdmin(user: { email: string | null; phone: string | null }) {
   const emailMatches = Boolean(
     env.ADMIN_EMAIL && user.email && user.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()
@@ -95,6 +141,221 @@ authRouter.post("/magic-link", async (req, res, next) => {
       accountType: intent === "seller" ? "FREE_SELLER" : "BUYER",
       message: "If the account exists, a secure login link has been sent.",
       ...(env.NODE_ENV !== "production" ? { devLink: url } : {}),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post("/premium/request", async (req, res, next) => {
+  try {
+    const rawIdentity = z.string().trim().min(3).parse(req.body?.identity);
+    const identityValue = normalizeIdentity(rawIdentity);
+    const testPhone = normalizeIdentity(env.PREMIUM_TEST_PHONE || "0729914983");
+    const isTestAccount = identityValue === testPhone;
+
+    let user = null;
+
+    if (identityValue.includes("@")) {
+      user = await prisma.user.findUnique({ where: { email: identityValue } });
+    } else {
+      user = await prisma.user.findUnique({ where: { phone: identityValue } });
+    }
+
+    if (!user && !isTestAccount) {
+      return res.status(404).json({
+        error: "No Premium seller account was found for that phone number or email.",
+      });
+    }
+
+    if (!user && isTestAccount) {
+      user = await prisma.user.create({
+        data: {
+          phone: testPhone,
+          name: "Premium Test Seller",
+          role: "SELLER",
+        },
+      });
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: "Premium seller account not found." });
+    }
+
+    await ensurePremiumSeller(user.id, user.name);
+
+    if (isTestAccount) {
+      const active = await prisma.subscription.findFirst({
+        where: {
+          userId: user.id,
+          status: "ACTIVE",
+          endsAt: { gt: new Date() },
+        },
+      });
+
+      if (!active) {
+        await prisma.subscription.create({
+          data: {
+            userId: user.id,
+            status: "ACTIVE",
+            plan: "premium",
+            priceCents: env.PREMIUM_PRICE_KES * 100,
+            startsAt: new Date(),
+            endsAt: new Date(
+              Date.now() + env.PREMIUM_DURATION_DAYS * 24 * 60 * 60 * 1000
+            ),
+          },
+        });
+      }
+    } else {
+      const active = await prisma.subscription.findFirst({
+        where: {
+          userId: user.id,
+          status: "ACTIVE",
+          endsAt: { gt: new Date() },
+        },
+      });
+
+      if (!active) {
+        return res.status(403).json({
+          error: "Premium subscription is required for Premium Magic Login.",
+        });
+      }
+    }
+
+    const code = isTestAccount
+      ? (env.PREMIUM_TEST_CODE || "1234")
+      : String(Math.floor(100000 + Math.random() * 900000));
+
+    await prisma.magicLink.deleteMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
+      },
+    });
+
+    await prisma.magicLink.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(`premium:${identityValue}:${code}`),
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
+
+    /*
+     * Production SMS integration can be attached through SMS_WEBHOOK_URL.
+     * The configured test account deliberately uses the fixed code so the
+     * Premium flow can be tested without a live SMS provider.
+     */
+    if (env.SMS_WEBHOOK_URL && !isTestAccount) {
+      try {
+        await fetch(env.SMS_WEBHOOK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(env.SMS_WEBHOOK_TOKEN
+              ? { Authorization: `Bearer ${env.SMS_WEBHOOK_TOKEN}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            phone: user.phone,
+            code,
+            message: `Your UzaLink Premium login code is ${code}`,
+          }),
+        });
+      } catch (smsError) {
+        console.error("[PREMIUM SMS] Failed to send verification code", smsError);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      message: isTestAccount
+        ? "Test SMS code sent. Enter the configured test code."
+        : "Your Premium SMS verification code has been sent.",
+      testMode: isTestAccount,
+      ...(env.NODE_ENV !== "production" && isTestAccount
+        ? { devCode: code }
+        : {}),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post("/premium/verify", async (req, res, next) => {
+  try {
+    const rawIdentity = z.string().trim().min(3).parse(req.body?.identity);
+    const code = z.string().trim().min(4).max(8).parse(req.body?.code);
+    const identityValue = normalizeIdentity(rawIdentity);
+    const expectedToken = hashToken(
+      `premium:${identityValue}:${code}`
+    );
+
+    const link = await prisma.magicLink.findUnique({
+      where: { tokenHash: expectedToken },
+      include: { user: true },
+    });
+
+    if (!link || link.usedAt) {
+      return res.status(400).json({
+        error: "Invalid or already used Premium verification code.",
+      });
+    }
+
+    if (link.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({
+        error: "Premium verification code has expired.",
+      });
+    }
+
+    const activeSubscription = await prisma.subscription.findFirst({
+      where: {
+        userId: link.user.id,
+        status: "ACTIVE",
+        endsAt: { gt: new Date() },
+      },
+      orderBy: { endsAt: "desc" },
+    });
+
+    if (!activeSubscription) {
+      return res.status(403).json({
+        error: "Active Premium subscription required.",
+      });
+    }
+
+    await ensurePremiumSeller(link.user.id, link.user.name);
+
+    await prisma.magicLink.update({
+      where: { id: link.id },
+      data: { usedAt: new Date() },
+    });
+
+    setSessionCookie(res, {
+      userId: link.user.id,
+      role: "SELLER",
+    });
+
+    const user = await prisma.user.findUnique({
+      where: { id: link.user.id },
+      include: {
+        seller: true,
+        subscriptions: {
+          where: {
+            status: "ACTIVE",
+            endsAt: { gt: new Date() },
+          },
+          orderBy: { endsAt: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    return res.json({
+      ok: true,
+      user,
+      seller: true,
+      premium: true,
     });
   } catch (error) {
     next(error);
