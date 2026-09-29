@@ -473,12 +473,6 @@ adminRouter.get("/dashboard", async (_req, res, next) => {
       prisma.product.findMany({
         where: {
           status: "ACTIVE",
-          kind: "DIGITAL",
-          seller: {
-            user: {
-              role: "SELLER",
-            },
-          },
         },
         include: {
           seller: {
