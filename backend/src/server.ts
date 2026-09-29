@@ -19,85 +19,51 @@ import { engagementRouter } from "./routes/engagement.js";
 import { messagingRouter } from "./routes/messaging.js";
 
 const app = express();
-
 app.set("trust proxy", 1);
-
-/* =========================================================
-   CORS
-========================================================= */
 
 const allowedOrigins = [
   "https://uzalink.vercel.app",
   "http://localhost:5173",
   "http://localhost:3000",
-
   ...(process.env.FRONTEND_URL || "")
     .split(",")
     .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean),
 ];
 
+function isAllowedOrigin(origin: string) {
+  const normalized = origin.replace(/\/$/, "");
+  if (allowedOrigins.includes(normalized)) return true;
+  try {
+    const url = new URL(normalized);
+    // Allow only UzaLink's own Vercel preview/deployment subdomains.
+    // This fixes browser API/image loading on Vercel previews without opening
+    // credentialed CORS to arbitrary origins.
+    return url.protocol === "https:" && url.hostname.endsWith(".vercel.app") && url.hostname.toLowerCase().includes("uzalink");
+  } catch {
+    return false;
+  }
+}
+
 console.log("[CORS] Allowed origins:", allowedOrigins);
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests without an Origin header
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    const normalizedOrigin = origin.replace(/\/$/, "");
-
-    if (allowedOrigins.includes(normalizedOrigin)) {
-      return callback(null, true);
-    }
-
+    if (!origin) return callback(null, true);
+    if (isAllowedOrigin(origin)) return callback(null, true);
     console.error("[CORS] Blocked origin:", origin);
-
-    return callback(
-      new Error(`CORS blocked origin: ${origin}`)
-    );
+    return callback(new Error(`CORS blocked origin: ${origin}`));
   },
-
   credentials: true,
-
-  methods: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-  ],
-
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-  ],
-
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   optionsSuccessStatus: 204,
 };
 
-app.use(helmet({
-  // Book covers are intentionally embedded by the Vercel frontend.
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-}));
-
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors(corsOptions));
-
-// Explicitly handle browser preflight requests
-
 app.use(cookieParser());
-
-app.use(
-  express.json({
-    limit: "2mb",
-  })
-);
-
-/* =========================================================
-   RATE LIMITING
-========================================================= */
+app.use(express.json({ limit: "2mb" }));
 
 const apiLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -105,89 +71,38 @@ const apiLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-
 app.use("/api", apiLimit);
 
-/* =========================================================
-   HEALTH CHECK
-========================================================= */
-
-app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "uzalink-api",
-  });
-});
-
-/* =========================================================
-   API ROUTES
-========================================================= */
-
+app.get("/health", (_req, res) => res.json({ ok: true, service: "uzalink-api" }));
 app.use("/api/auth", authRouter);
-
 app.use("/api/products", productRouter);
-
 app.use("/api/orders", orderRouter);
-
 app.use("/api/seller", sellerRouter);
-
 app.use("/api/admin", adminRouter);
-
 app.use("/api/subscriptions", subscriptionRouter);
-
 app.use("/api/payouts", payoutRouter);
 app.use("/api/engagement", engagementRouter);
 app.use("/api/messages", messagingRouter);
 
-/* =========================================================
-   ERROR HANDLER
-========================================================= */
-
-app.use(
-  (
-    err: any,
-    req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
-    console.error("[SERVER ERROR]", {
-      method: req.method,
-      url: req.originalUrl,
-      message: err?.message,
-      stack: process.env.NODE_ENV === "production" ? undefined : err?.stack,
-    });
-
-    res.status(err?.statusCode || 500).json({
-      error: process.env.NODE_ENV === "production"
-        ? "Server error"
-        : err?.message || "Server error",
-    });
-  }
-);
-
-/* =========================================================
-   SERVER
-========================================================= */
-
-const server = app.listen(env.PORT, () => {
-  console.log(
-    `UzaLink API listening on ${env.PORT}`
-  );
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[SERVER ERROR]", {
+    method: req.method,
+    url: req.originalUrl,
+    message: err?.message,
+    stack: process.env.NODE_ENV === "production" ? undefined : err?.stack,
+  });
+  res.status(err?.statusCode || 500).json({
+    error: process.env.NODE_ENV === "production" ? "Server error" : err?.message || "Server error",
+  });
 });
 
-/* =========================================================
-   GRACEFUL SHUTDOWN
-========================================================= */
+const server = app.listen(env.PORT, () => console.log(`UzaLink API listening on ${env.PORT}`));
 
 const shutdown = async () => {
   console.log("Shutting down UzaLink API...");
-
   server.close();
-
   await prisma.$disconnect();
-
   process.exit(0);
 };
-
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
