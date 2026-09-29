@@ -75,7 +75,7 @@ productRouter.get("/", async (_req, res, next) => {
 
 productRouter.get("/:code", async (req, res, next) => {
   try {
-    const product = await prisma.product.findUnique({ where: { code: req.params.code, seller: { user: { role: "SELLER" } } }, include: { seller: { select: { handle: true, user: { select: { name: true } } } } } });
+    const product = await prisma.product.findFirst({ where: { code: req.params.code, seller: { user: { role: "SELLER" } } }, include: { seller: { select: { handle: true, user: { select: { name: true } } } } } });
     if (!product || product.status !== "ACTIVE") return res.status(404).json({ error: "Product not found" });
     res.json({ product });
   } catch (e) { next(e); }
