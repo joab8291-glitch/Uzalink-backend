@@ -14,6 +14,10 @@ const envSchema = z.object({
   ADMIN_PHONE: z.string().min(7).optional(),
   ADMIN_NAME: z.string().default("UzaLink Admin"),
 
+  ADMIN_TEST_ENABLED: z.coerce.boolean().default(false),
+  ADMIN_TEST_PHONE: z.string().min(7).optional(),
+  ADMIN_TEST_CODE: z.string().min(4).optional(),
+
   RESEND_API_KEY: z.string().optional(),
   MAIL_FROM: z.string().optional(),
 
