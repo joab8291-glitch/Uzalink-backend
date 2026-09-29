@@ -34,6 +34,8 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: z.string().default("false"),
   SMS_WEBHOOK_URL: z.string().optional(),
   SMS_WEBHOOK_TOKEN: z.string().optional(),
+  PREMIUM_TEST_PHONE: z.string().default("0729914983"),
+  PREMIUM_TEST_CODE: z.string().default("1234"),
 });
 
 export const env = envSchema.parse(process.env);
