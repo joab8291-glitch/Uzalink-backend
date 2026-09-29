@@ -19,7 +19,11 @@ export async function createOrder(
   referralCode?: string
 ) {
   const product = await prisma.product.findFirst({
-    where: { id: productId, status: "ACTIVE" },
+    where: {
+      id: productId,
+      status: "ACTIVE",
+      seller: { user: { role: "SELLER" } },
+    },
   });
 
   if (!product) throw new Error("Product not found or unavailable");
