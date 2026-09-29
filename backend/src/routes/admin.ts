@@ -424,31 +424,9 @@ adminRouter.get("/audit-logs", async (_req, res, next) => {
 
 adminRouter.get("/dashboard", async (_req, res, next) => {
   try {
-    const legacyProfiles = await prisma.sellerProfile.findMany({
-      where: {
-        user: {
-          role: {
-            not: "SELLER",
-          },
-        },
-      },
-      select: { id: true },
-    });
-
-    if (legacyProfiles.length) {
-      await prisma.product.updateMany({
-        where: {
-          sellerId: {
-            in: legacyProfiles.map((profile) => profile.id),
-          },
-          status: "ACTIVE",
-        },
-        data: {
-          status: "DRAFT",
-        },
-      });
-    }
-
+    // Never mutate product status while merely loading the admin dashboard.
+    // Marketplace visibility and admin visibility are separate concerns.
+    // Products that are ACTIVE and visible in Explore must remain ACTIVE here too.
     const sellerRows = await ensureActiveSellerProfiles();
 
     const [
@@ -467,12 +445,6 @@ adminRouter.get("/dashboard", async (_req, res, next) => {
       prisma.product.count({
         where: {
           status: "ACTIVE",
-          kind: "DIGITAL",
-          seller: {
-            user: {
-              role: "SELLER",
-            },
-          },
         },
       }),
 
