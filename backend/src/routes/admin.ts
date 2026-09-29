@@ -45,7 +45,6 @@ async function ensureActiveSellerProfiles() {
     include: {
       user: true,
       products: {
-        where: { status: "ACTIVE" },
         orderBy: { createdAt: "desc" },
       },
       payouts: {
@@ -442,11 +441,7 @@ adminRouter.get("/dashboard", async (_req, res, next) => {
     ] = await Promise.all([
       prisma.user.count(),
 
-      prisma.product.count({
-        where: {
-          status: "ACTIVE",
-        },
-      }),
+      prisma.product.count(),
 
       prisma.order.count(),
 
@@ -471,9 +466,6 @@ adminRouter.get("/dashboard", async (_req, res, next) => {
       }),
 
       prisma.product.findMany({
-        where: {
-          status: "ACTIVE",
-        },
         include: {
           seller: {
             include: {
