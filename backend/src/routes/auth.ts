@@ -151,6 +151,9 @@ authRouter.post("/premium/request", async (req, res, next) => {
   try {
     const rawIdentity = z.string().trim().min(3).parse(req.body?.identity);
     const identityValue = normalizeIdentity(rawIdentity);
+    // TEMPORARY OPEN GATE FOR PREMIUM TESTING.
+    // Restore the subscription check after testing is confirmed.
+    const openGate = env.PREMIUM_OPEN_GATE;
     const testPhone = normalizeIdentity(env.PREMIUM_TEST_PHONE || "0729914983");
     const isTestAccount = identityValue === testPhone;
 
@@ -162,13 +165,13 @@ authRouter.post("/premium/request", async (req, res, next) => {
       user = await prisma.user.findUnique({ where: { phone: identityValue } });
     }
 
-    if (!user && !isTestAccount) {
+    if (!user && !openGate && !isTestAccount) {
       return res.status(404).json({
         error: "No Premium seller account was found for that phone number or email.",
       });
     }
 
-    if (!user && isTestAccount) {
+    if (!user && (openGate || isTestAccount)) {
       user = await prisma.user.create({
         data: {
           phone: testPhone,
@@ -184,7 +187,7 @@ authRouter.post("/premium/request", async (req, res, next) => {
 
     await ensurePremiumSeller(user.id, user.name);
 
-    if (isTestAccount) {
+    if (openGate || isTestAccount) {
       const active = await prisma.subscription.findFirst({
         where: {
           userId: user.id,
@@ -223,7 +226,7 @@ authRouter.post("/premium/request", async (req, res, next) => {
       }
     }
 
-    const code = isTestAccount
+    const code = openGate || isTestAccount
       ? (env.PREMIUM_TEST_CODE || "1234")
       : String(Math.floor(100000 + Math.random() * 900000));
 
@@ -270,11 +273,9 @@ authRouter.post("/premium/request", async (req, res, next) => {
 
     return res.json({
       ok: true,
-      message: isTestAccount
-        ? "Test SMS code sent. Enter the configured test code."
-        : "Your Premium SMS verification code has been sent.",
-      testMode: isTestAccount,
-      ...(env.NODE_ENV !== "production" && isTestAccount
+      message: "SMS verification code sent.",
+      testMode: openGate,
+      ...(env.NODE_ENV !== "production" && openGate
         ? { devCode: code }
         : {}),
     });
@@ -309,7 +310,7 @@ authRouter.post("/premium/verify", async (req, res, next) => {
       });
     }
 
-    const activeSubscription = await prisma.subscription.findFirst({
+    let activeSubscription = await prisma.subscription.findFirst({
       where: {
         userId: link.user.id,
         status: "ACTIVE",
@@ -317,6 +318,21 @@ authRouter.post("/premium/verify", async (req, res, next) => {
       },
       orderBy: { endsAt: "desc" },
     });
+
+    if (!activeSubscription && env.PREMIUM_OPEN_GATE) {
+      activeSubscription = await prisma.subscription.create({
+        data: {
+          userId: link.user.id,
+          status: "ACTIVE",
+          plan: "premium",
+          priceCents: env.PREMIUM_PRICE_KES * 100,
+          startsAt: new Date(),
+          endsAt: new Date(
+            Date.now() + env.PREMIUM_DURATION_DAYS * 24 * 60 * 60 * 1000
+          ),
+        },
+      });
+    }
 
     if (!activeSubscription) {
       return res.status(403).json({
