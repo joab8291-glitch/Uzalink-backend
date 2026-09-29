@@ -14,23 +14,52 @@ const upload = multer({
 
 export const productRouter = Router();
 
+/** Public cover endpoint. Uses findFirst because the lookup includes a relation filter. */
 productRouter.get("/:code/cover", async (req, res, next) => {
   try {
-    const product = await prisma.product.findUnique({ where: { code: req.params.code, seller: { user: { role: "SELLER" } } } });
-    if (!product || product.status !== "ACTIVE") return res.status(404).json({ error: "Product cover not found" });
+    const product = await prisma.product.findFirst({
+      where: {
+        code: req.params.code,
+        status: "ACTIVE",
+        seller: { user: { role: "SELLER" } },
+      },
+      select: {
+        coverKey: true,
+        imageUrl: true,
+        fileName: true,
+      },
+    });
+
+    if (!product) return res.status(404).json({ error: "Product cover not found" });
+
     if (!product.coverKey) {
       if (product.imageUrl) return res.redirect(302, product.imageUrl);
       return res.status(404).json({ error: "Product cover not found" });
     }
+
     const object = await getPrivateObject(product.coverKey);
-    if (object.ContentLength !== undefined) res.setHeader("Content-Length", String(object.ContentLength));
-    res.setHeader("Content-Type", object.ContentType || "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=900");
     if (!object.Body) return res.status(404).json({ error: "Product cover not found" });
+
+    res.status(200);
+    res.setHeader("Content-Type", object.ContentType || "image/jpeg");
+    if (object.ContentLength !== undefined) {
+      res.setHeader("Content-Length", String(object.ContentLength));
+    }
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=900, stale-while-revalidate=3600");
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
     const body = object.Body as any;
-    if (typeof body.pipe === "function") body.pipe(res);
-    else res.end(Buffer.from(await body.transformToByteArray()));
-  } catch (e) { next(e); }
+    if (typeof body.pipe === "function") {
+      body.on("error", next);
+      body.pipe(res);
+    } else {
+      res.end(Buffer.from(await body.transformToByteArray()));
+    }
+  } catch (e) {
+    next(e);
+  }
 });
 
 productRouter.get("/", async (_req, res, next) => {
@@ -72,11 +101,7 @@ function sellerHandle(shopName: string) {
   return `${base}_${crypto.randomBytes(3).toString("hex")}`;
 }
 
-/**
- * Sell Today supports FREE sellers without dashboard/login access.
- * The shop name + M-Pesa number create/reuse the seller identity.
- * Premium/dashboard authentication remains separate.
- */
+/** Sell Today supports FREE sellers without dashboard/login access. */
 productRouter.post("/", upload.fields([{ name: "file", maxCount: 1 }, { name: "cover", maxCount: 1 }]), async (req: any, res, next) => {
   try {
     const body = productSchema.parse(req.body);
