@@ -100,6 +100,23 @@ orderRouter.post("/:id/pay", async (req, res, next) => {
       });
     }
 
+    const existingPayment = await prisma.payment.findFirst({
+      where: {
+        orderId: order.id,
+        status: "PENDING",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existingPayment?.checkoutRequestId) {
+      return res.json({
+        orderId: order.id,
+        publicId: order.publicId,
+        checkoutRequestId: existingPayment.checkoutRequestId,
+        message: "An M-Pesa payment request is already pending.",
+      });
+    }
+
     const payment = await prisma.payment.create({
       data: {
         orderId: order.id,
@@ -108,12 +125,25 @@ orderRouter.post("/:id/pay", async (req, res, next) => {
       },
     });
 
-    const mp = await stkPush({
+    let mp;
+    try {
+      mp = await stkPush({
       phone: order.buyerPhone,
       amountCents: order.amountCents,
       accountReference: order.publicId,
       description: order.items[0].product.name,
-    });
+      });
+    } catch (error) {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: "FAILED",
+          resultDescription:
+            error instanceof Error ? error.message : "M-Pesa STK request failed",
+        },
+      }).catch(() => {});
+      throw error;
+    }
 
     await prisma.payment.update({
       where: {
@@ -372,6 +402,91 @@ orderRouter.post(
         getMetadata("MpesaReceiptNumber") || ""
       );
 
+      const callbackAmountCents =
+        Number(getMetadata("Amount") || 0) * 100;
+
+      if (
+        !Number.isFinite(callbackAmountCents) ||
+        callbackAmountCents !== payment.amountCents
+      ) {
+        console.error("[M-Pesa] Callback amount mismatch", {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          expectedAmountCents: payment.amountCents,
+          callbackAmountCents,
+        });
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: "FAILED",
+            resultCode,
+            resultDescription: "M-Pesa callback amount mismatch",
+            rawCallback: req.body,
+          },
+        });
+        return;
+      }
+
+      const callbackPhone = getMetadata("PhoneNumber");
+      if (callbackPhone) {
+        try {
+          if (normalizePhone(String(callbackPhone)) !== normalizePhone(payment.phone)) {
+            console.error("[M-Pesa] Callback phone mismatch", {
+              paymentId: payment.id,
+              orderId: payment.orderId,
+            });
+            await prisma.payment.update({
+              where: { id: payment.id },
+              data: {
+                status: "FAILED",
+                resultCode,
+                resultDescription: "M-Pesa callback phone mismatch",
+                rawCallback: req.body,
+              },
+            });
+            return;
+          }
+        } catch {
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: "FAILED",
+              resultCode,
+              resultDescription: "Invalid M-Pesa callback phone",
+              rawCallback: req.body,
+            },
+          });
+          return;
+        }
+      }
+
+      if (receipt) {
+        const duplicateReceipt = await prisma.payment.findFirst({
+          where: {
+            receipt,
+            status: "SUCCESS",
+            id: { not: payment.id },
+          },
+          select: { id: true },
+        });
+        if (duplicateReceipt) {
+          console.error("[M-Pesa] Duplicate receipt rejected", {
+            paymentId: payment.id,
+            receipt,
+          });
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: "FAILED",
+              resultCode,
+              resultDescription: "M-Pesa receipt already used",
+              rawCallback: req.body,
+            },
+          });
+          return;
+        }
+      }
+
       /**
        * Store successful callback details
        */
@@ -398,6 +513,20 @@ orderRouter.post(
             paymentId: payment.id,
           },
         });
+
+      if (
+        subscription &&
+        payment.amountCents !== subscription.priceCents
+      ) {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: "FAILED",
+            resultDescription: "Premium payment amount mismatch",
+          },
+        });
+        return;
+      }
 
       if (subscription) {
         const starts = new Date();
