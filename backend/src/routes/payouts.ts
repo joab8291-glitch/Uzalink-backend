@@ -7,18 +7,27 @@ function accepted(res: any) {
   return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
 }
 
+async function findPayoutFromResult(result: any) {
+  const conversationId = String(result?.ConversationID || "").trim();
+  const originatorConversationId = String(result?.OriginatorConversationID || "").trim();
+  if (!conversationId && !originatorConversationId) return null;
+
+  return prisma.payout.findFirst({
+    where: {
+      OR: [
+        ...(conversationId ? [{ reference: conversationId }] : []),
+        ...(originatorConversationId ? [{ reference: originatorConversationId }] : []),
+      ],
+    },
+  });
+}
+
 payoutRouter.post("/mpesa/result", async (req, res, next) => {
   try {
     accepted(res);
 
     const result = req.body?.Result;
-    const conversationId = String(result?.ConversationID || "").trim();
-    if (!conversationId) return;
-
-    const payout = await prisma.payout.findFirst({
-      where: { reference: conversationId },
-    });
-
+    const payout = await findPayoutFromResult(result);
     if (!payout || payout.status !== "PROCESSING") return;
 
     if (Number(result?.ResultCode) === 0) {
@@ -28,20 +37,15 @@ payoutRouter.post("/mpesa/result", async (req, res, next) => {
           data: {
             status: "PAID",
             processedAt: new Date(),
-            reference: String(result?.TransactionID || conversationId),
+            reference: String(result?.TransactionID || result?.ConversationID || payout.reference || ""),
           },
         });
 
         if (claimed.count !== 1) return;
 
         const released = await tx.sellerProfile.updateMany({
-          where: {
-            id: payout.sellerId,
-            pendingCents: { gte: payout.amountCents },
-          },
-          data: {
-            pendingCents: { decrement: payout.amountCents },
-          },
+          where: { id: payout.sellerId, pendingCents: { gte: payout.amountCents } },
+          data: { pendingCents: { decrement: payout.amountCents } },
         });
 
         if (released.count !== 1) {
@@ -56,14 +60,10 @@ payoutRouter.post("/mpesa/result", async (req, res, next) => {
         where: { id: payout.id, status: "PROCESSING" },
         data: { status: "FAILED" },
       });
-
       if (claimed.count !== 1) return;
 
       const restored = await tx.sellerProfile.updateMany({
-        where: {
-          id: payout.sellerId,
-          pendingCents: { gte: payout.amountCents },
-        },
+        where: { id: payout.sellerId, pendingCents: { gte: payout.amountCents } },
         data: {
           pendingCents: { decrement: payout.amountCents },
           balanceCents: { increment: payout.amountCents },
@@ -83,16 +83,7 @@ payoutRouter.post("/mpesa/timeout", async (req, res, next) => {
   try {
     accepted(res);
 
-    const conversationId = String(
-      req.body?.Result?.ConversationID || ""
-    ).trim();
-
-    if (!conversationId) return;
-
-    const payout = await prisma.payout.findFirst({
-      where: { reference: conversationId },
-    });
-
+    const payout = await findPayoutFromResult(req.body?.Result);
     if (!payout || payout.status !== "PROCESSING") return;
 
     await prisma.$transaction(async (tx) => {
@@ -100,14 +91,10 @@ payoutRouter.post("/mpesa/timeout", async (req, res, next) => {
         where: { id: payout.id, status: "PROCESSING" },
         data: { status: "FAILED" },
       });
-
       if (claimed.count !== 1) return;
 
       const restored = await tx.sellerProfile.updateMany({
-        where: {
-          id: payout.sellerId,
-          pendingCents: { gte: payout.amountCents },
-        },
+        where: { id: payout.sellerId, pendingCents: { gte: payout.amountCents } },
         data: {
           pendingCents: { decrement: payout.amountCents },
           balanceCents: { increment: payout.amountCents },
